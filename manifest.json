@@ -26,6 +26,12 @@
   "content_scripts": [
     {
       "matches": ["http://*/*", "https://*/*"],
+      "exclude_matches": [
+        "*://chrome.google.com/webstore*",
+        "*://chromewebstore.google.com/*",
+        "*://microsoftedge.microsoft.com/addons*",
+        "*://microsoftedge.microsoft.com/*/addons*"
+      ],
       "js": ["shadow-dom-bridge.js"],
       "run_at": "document_start",
       "all_frames": true,
@@ -35,6 +41,12 @@
     },
     {
       "matches": ["http://*/*", "https://*/*"],
+      "exclude_matches": [
+        "*://chrome.google.com/webstore*",
+        "*://chromewebstore.google.com/*",
+        "*://microsoftedge.microsoft.com/addons*",
+        "*://microsoftedge.microsoft.com/*/addons*"
+      ],
       "js": ["utils.js", "constants.js", "content-script.js"],
       "run_at": "document_start",
       "all_frames": true,
