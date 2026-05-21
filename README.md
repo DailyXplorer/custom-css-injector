@@ -24,4 +24,4 @@ https://github.com/DailyXplorer/custom-css-injector
 
 ## License
 
-Source published for transparency and community use. Check repository settings or add a `LICENSE` file if you need a specific license.
+[PolyForm Noncommercial License 1.0.0](LICENSE) — you may copy, modify, and redistribute this software for **noncommercial** purposes. **Commercial use is not allowed** (selling the code, paid redistribution, or using it as part of a commercial product or service without permission from the author).
