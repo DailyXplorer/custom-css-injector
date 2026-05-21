@@ -2,7 +2,7 @@
 
 Chrome extension (Manifest V3) to inject custom CSS per domain — including iframes and Shadow DOM where supported.
 
-**Version:** 2.1.1
+**Version:** 2.1.2
 
 ## Install (Chrome Web Store)
 
