@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Custom CSS Injector</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="utils.js"></script>
+  <script src="constants.js"></script>
+  <script src="popup-storage-helpers.js"></script>
+</head>
+
+<body>
+  <div class="header-row">
+    <h1>Custom CSS Injector<span id="version-text"></span></h1>
+    <a href="whats-new.html" id="whats-new-btn" class="release-badge" target="_blank" rel="noopener noreferrer">
+      What's new
+    </a>
+  </div>
+  <div class="status-bar">
+    <label class="toggle">
+      <input type="checkbox" id="toggle-css" checked aria-labelledby="toggle-css-label">
+      <span class="slider"></span>
+      <span id="toggle-css-label" class="toggle-label" aria-live="polite">Enabled</span>
+    </label>
+    <div class="action-buttons">
+      <button id="copy-btn" class="icon-btn" title="Copy CSS" aria-label="Copy CSS" aria-pressed="false">
+        <img id="copy-icon" class="icon icon-small" src="assets/icons/copy.svg" alt="Copy icon" width="18" height="18">
+      </button>
+      <button id="export-btn" class="icon-btn" title="Export config" aria-label="Export config" aria-pressed="false">
+        <img id="export-icon" class="icon icon-small" src="assets/icons/download.svg" alt="Export icon" width="18" height="18">
+      </button>
+      <button id="import-btn" class="icon-btn" title="Import config" aria-label="Import config" aria-pressed="false">
+        <img id="import-icon" class="icon icon-small" src="assets/icons/upload.svg" alt="Import icon" width="18" height="18">
+      </button>
+      <button id="reset-btn" class="icon-btn" title="Reset CSS" aria-label="Reset CSS">
+        <img id="reset-icon" class="icon icon-small" src="assets/icons/trash.svg" alt="Trash icon" width="18" height="18">
+      </button>
+    </div>
+  </div>
+  <div id="config-toast" class="config-toast" role="status" aria-live="polite" aria-atomic="true"></div>
+
+  <div class="editor-container">
+    <pre id="line-numbers" aria-hidden="true"></pre>
+    <div class="editor-stack">
+      <textarea
+        id="css-editor"
+        placeholder="Your CSS here…"
+        wrap="off"
+        spellcheck="false"
+        autocapitalize="off"
+        autocorrect="off"
+        autocomplete="off"
+        writingsuggestions="false"
+        data-gramm="false"
+        data-gramm_editor="false"
+      ></textarea>
+    </div>
+  </div>
+  <input type="file" id="import-file" accept=".json,application/json" hidden>
+  <div class="buttons-layout">
+    <div class="cta-row" aria-label="Quick links">
+      <a href="https://github.com/DailyXplorer/custom-css-injector" id="github-link" class="cta-btn cta-github" target="_blank"
+        rel="noopener noreferrer">
+        <img class="cta-icon" src="assets/icons/github.svg" alt="" width="14" height="14">
+        GitHub
+      </a>
+      <a href="https://www.buymeacoffee.com/DailyXplorer" id="support-link" class="cta-btn cta-support" target="_blank"
+        rel="noopener noreferrer">
+        <img class="cta-icon" src="assets/icons/coffee.svg" alt="Support" width="14" height="14">
+        Support
+      </a>
+    </div>
+  </div>
+  <script src="popup-main.js"></script>
+</body>
+
+</html>
