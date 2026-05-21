@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Custom CSS Injector — Release notes</title>
+  <link rel="stylesheet" href="whats-new.css">
+</head>
+
+<body>
+  <main class="release-page">
+    <header class="release-header">
+      <h1>Release notes</h1>
+    </header>
+
+    <article class="release-version" id="v2-1-1">
+      <header class="release-version-header">
+        <h2 class="release-version-title">2.1.1 update</h2>
+        <p class="release-date"><time datetime="2026-04-27">28 April 2026</time></p>
+      </header>
+
+      <section class="release-section">
+        <h3>Fonts and performance</h3>
+        <ul>
+          <li>Optimized general extension performance for a smoother day-to-day experience.</li>
+          <li>Removed unused Cabinet Grotesk assets and an unused Telegraf weight to reduce package size.</li>
+          <li>Kept Telegraf for the popup UI and Lilex for CSS editing, with lighter WOFF2 assets where possible.</li>
+        </ul>
+      </section>
+    </article>
+
+    <div class="release-divider" role="presentation"></div>
+
+    <article class="release-version release-version--past" id="v2-1-0">
+      <header class="release-version-header">
+        <h2 class="release-version-title">2.1.0 update</h2>
+        <p class="release-date"><time datetime="2026-04-27">27 April 2026</time></p>
+      </header>
+
+      <section class="release-section">
+        <h3>Overview</h3>
+        <p>On many sites, important UI lives outside the “main” document tree: embedded frames, inert
+          <code>about:blank</code> descendants, or components scoped with shadow DOM. Styles you inject only at the top
+          level often miss those surfaces. This release widens where the same per-host CSS can apply, while staying
+          within what browsers allow an extension to touch.</p>
+      </section>
+
+      <section class="release-section">
+        <h3>Bug fixes and reliability</h3>
+        <ul>
+          <li>Fixed several edge cases around iframe, shadow DOM, popup persistence, and import/export behavior.</li>
+        </ul>
+      </section>
+    </article>
+
+    <div class="release-divider" role="presentation"></div>
+
+    <article class="release-version release-version--past" id="v2-0-1">
+      <header class="release-version-header">
+        <h2 class="release-version-title">2.0.1 update</h2>
+        <p class="release-date"><time datetime="2026-03-22">22 March 2026</time></p>
+      </header>
+
+      <section class="release-section">
+        <h3>Icons</h3>
+        <p>Toolbar and store icons were regenerated so the artwork uses the full icon canvas (less empty padding).
+          The <code>{css}</code> file glyph should read clearer at 16×16 and look larger in the Chrome Web Store
+          listing.</p>
+      </section>
+    </article>
+
+    <div class="release-divider" role="presentation"></div>
+
+    <article class="release-version release-version--past" id="v2-0-0">
+      <header class="release-version-header">
+        <h2 class="release-version-title">2.0.0 update</h2>
+        <p class="release-date"><time datetime="2026-03-22">22 March 2026</time></p>
+      </header>
+
+      <section class="release-section">
+        <h3>Overview</h3>
+        <p>This release changes quite a bit under the hood and in the popup. The goal is fewer surprises: simpler
+          storage, a more predictable editor, and a content script that tracks navigation and applies your CSS more
+          reliably on modern sites.</p>
+      </section>
+
+      <section class="release-section">
+        <h3>Prism removed — no syntax highlighting</h3>
+        <p>The Prism-based highlighter is gone. It was tied to a fragile overlay setup and caused real-world bugs
+          (sync with the real field, scrolling, large pastes, focus). There is <strong>no syntax coloring</strong>
+          anymore: you get a native textarea, line numbers, and the same editing shortcuts as before. The trade-off is
+          clarity and stability over pretty colors.</p>
+      </section>
+
+      <section class="release-section">
+        <h3>Local storage only</h3>
+        <p>All site CSS now lives in <code>chrome.storage.local</code>. The old Chrome sync layer and local draft
+          recovery paths are removed so there is a single source of truth per profile. On first launch after this
+          update, existing data in sync is copied into local when a hostname is not already present locally, then
+          removed from sync. Internal <code>draft:</code> keys are cleared.</p>
+      </section>
+
+      <section class="release-section">
+        <h3>Popup, content script, and import/export</h3>
+        <p>The popup and content script were rebuilt around straightforward read, debounced save, and live tab preview.
+          Import and export still use the same JSON shape as before. Internally, import/export and storage bookkeeping
+          live in a dedicated script so the main popup file stays easier to follow; the injector keeps one clear path
+          for “what is applied on this tab” to avoid duplicated logic.</p>
+      </section>
+
+      <section class="release-section">
+        <h3>Editor and UI</h3>
+        <ul>
+          <li>Clean white popup with line numbers—no extra editor layer on top of the field.</li>
+          <li>Comfortable for larger stylesheets; UI uses Telegraf for chrome text and a monospace stack for CSS.</li>
+        </ul>
+      </section>
+
+      <section class="release-section">
+        <h3>Note</h3>
+        <p>CSS is no longer synced across devices by Chrome. Use export/import to move configuration between
+          installations if you need to.</p>
+      </section>
+    </article>
+
+    <div class="release-divider" role="presentation"></div>
+
+    <article class="release-version release-version--past" id="v1-5-0">
+      <header class="release-version-header">
+        <h2 class="release-version-title">What's New in 1.5.0</h2>
+        <p class="release-date"><time datetime="2026-03-08">8 March 2026</time></p>
+      </header>
+
+      <section class="release-section">
+        <h3>Configuration Import / Export</h3>
+        <p>You can now export your full setup (all sites + CSS + enabled/disabled states) into a JSON file and import
+          it in another browser.</p>
+      </section>
+
+      <section class="release-section">
+        <h3>Editor refresh</h3>
+        <p>The editor received a visual refresh focused on CSS editing comfort and a clearer popup layout.</p>
+      </section>
+
+      <section class="release-section">
+        <h3>Reliability &amp; Performance Improvements</h3>
+        <ul>
+          <li>Editor saves are buffered more safely to reduce sync quota issues.</li>
+          <li>Local draft recovery keeps your latest edits if sync is temporarily unavailable.</li>
+          <li>Line number updates are lighter and avoid full redraws in common cases.</li>
+          <li>Unused editor assets were removed to keep the extension lean.</li>
+        </ul>
+      </section>
+
+      <section class="release-section">
+        <h3>Safer Runtime Behavior</h3>
+        <ul>
+          <li>Style tag matching/injection is more robust for special hostnames (including IPv6 cases).</li>
+          <li>Import now rejects oversized files before parsing to avoid UI freezes.</li>
+          <li>Popup state reacts better to external storage updates.</li>
+        </ul>
+      </section>
+    </article>
+  </main>
+</body>
+
+</html>

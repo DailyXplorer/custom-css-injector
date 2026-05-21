@@ -1,0 +1,418 @@
+:root {
+  --icon-size-normal: 20px;
+  --icon-size-small: 18px;
+  --primary-color: #5383ec;
+  --primary-hover: #4a72d3;
+  --success-color: #27ae60;
+  --error-color: #e74c3c;
+  --editor-height: 240px;
+  --ui-font-family: 'Telegraf', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --editor-code-font: 'Lilex', Menlo, Monaco, Consolas, 'Courier New', 'Liberation Mono', monospace;
+  --editor-font-size: 13px;
+  --editor-line-height: 18px;
+  --editor-font-weight: 400;
+  --line-numbers-width: 28px;
+  --editor-scrollbar-width: 0px;
+  --editor-scrollbar-height: 0px;
+  --editor-surface-bg: #ffffff;
+  --editor-gutter-bg: #f5f5f5;
+  --editor-gutter-fg: #888888;
+  --editor-gutter-border: #e0e0e0;
+  --editor-container-border: #dddddd;
+}
+
+@font-face {
+  font-family: 'Telegraf';
+  src: url('assets/fonts/telegraf/telegraf-400.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Telegraf';
+  src: url('assets/fonts/telegraf/telegraf-800.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Lilex';
+  src: url('assets/fonts/lilex/lilex-latin-400-normal.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+body {
+  font-family: var(--ui-font-family);
+  font-weight: 400;
+  margin: 10px;
+  width: 300px;
+  background-color: white;
+  color: #333;
+}
+
+h1 {
+  font-size: 16px;
+  margin: 0;
+  font-weight: 500;
+}
+
+.header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+#version-text {
+  font-size: 11px;
+  color: #888;
+  font-weight: 450;
+}
+
+.release-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  color: #fff;
+  border: 1px solid var(--primary-color);
+  background: var(--primary-color);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  padding: 7px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+  touch-action: manipulation;
+}
+
+.release-badge:hover {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+}
+
+.release-badge:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
+.status-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.config-toast {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  margin: 0;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: #eef2ff;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  transition: max-height 0.18s ease, opacity 0.18s ease, margin-bottom 0.18s ease, padding 0.18s ease;
+}
+
+.config-toast.is-visible {
+  max-height: 88px;
+  opacity: 1;
+  margin: 0 0 10px;
+  padding: 8px 10px;
+}
+
+.config-toast.is-success {
+  background: rgba(39, 174, 96, 0.12);
+  color: #166534;
+}
+
+.config-toast.is-error {
+  background: rgba(231, 76, 60, 0.12);
+  color: #991b1b;
+}
+
+.config-toast.is-warning {
+  background: rgba(245, 158, 11, 0.14);
+  color: #92400e;
+}
+
+.toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  margin-left: 2px;
+  touch-action: manipulation;
+}
+
+.toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  background-color: #ccc;
+  border-radius: 10px;
+  transition: background-color 0.18s ease;
+  margin-right: 8px;
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 16px;
+  width: 16px;
+  left: 2px;
+  bottom: 2px;
+  background-color: white;
+  border-radius: 50%;
+  transition: transform 0.18s ease;
+}
+
+input:checked+.slider {
+  background-color: var(--primary-color);
+}
+
+input:checked+.slider:before {
+  transform: translateX(16px);
+}
+
+.toggle-label {
+  font-size: 14px;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 3px;
+}
+
+.icon-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #666;
+  font-size: 16px;
+  padding: 5px 2px;
+  border-radius: 4px;
+  transition: color 0.12s ease, background-color 0.12s ease;
+  touch-action: manipulation;
+}
+
+.icon-btn:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
+.icon-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.icon {
+  width: var(--icon-size-normal);
+  height: var(--icon-size-normal);
+  display: inline-block;
+}
+
+.icon-small {
+  width: var(--icon-size-small);
+  height: var(--icon-size-small);
+}
+
+.editor-container {
+  position: relative;
+  display: flex;
+  border: 1px solid var(--editor-container-border);
+  border-radius: 4px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  background: var(--editor-surface-bg);
+}
+
+.editor-stack {
+  position: relative;
+  flex: 1;
+  height: var(--editor-height);
+}
+
+#line-numbers {
+  display: block;
+  margin: 0;
+  background: var(--editor-gutter-bg);
+  color: var(--editor-gutter-fg);
+  font-family: var(--editor-code-font);
+  font-size: var(--editor-font-size);
+  font-weight: var(--editor-font-weight);
+  line-height: var(--editor-line-height);
+  font-kerning: none;
+  font-variant-ligatures: none;
+  letter-spacing: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  padding: 8px 2px calc(8px + var(--editor-scrollbar-height)) 4px;
+  box-sizing: border-box;
+  text-align: right;
+  user-select: none;
+  width: var(--line-numbers-width);
+  min-width: var(--line-numbers-width);
+  flex-shrink: 0;
+  border: none;
+  border-right: 1px solid var(--editor-gutter-border);
+  border-radius: 0;
+  white-space: pre;
+  overflow: hidden;
+  overflow-wrap: normal;
+  word-wrap: normal;
+  tab-size: 2;
+  height: var(--editor-height);
+  resize: none;
+}
+
+#css-editor {
+  position: absolute;
+  inset: 0;
+  display: block;
+  vertical-align: top;
+  font-family: var(--editor-code-font);
+  font-size: var(--editor-font-size);
+  font-weight: var(--editor-font-weight);
+  line-height: var(--editor-line-height);
+  font-kerning: none;
+  font-variant-ligatures: none;
+  letter-spacing: 0;
+  padding: 8px calc(8px + var(--editor-scrollbar-width)) calc(8px + var(--editor-scrollbar-height)) 8px;
+  box-sizing: border-box;
+  border: none;
+  outline: none;
+  resize: none;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  white-space: pre;
+  word-wrap: normal;
+  overflow-wrap: normal;
+  tab-size: 2;
+  overflow-x: auto;
+  overflow-y: auto;
+  z-index: 1;
+  color: #1a1a1a;
+  -webkit-text-fill-color: #1a1a1a;
+  caret-color: #1a1a1a;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#css-editor:focus,
+#css-editor:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+#css-editor::-webkit-scrollbar {
+  width: 16px;
+  height: 16px;
+}
+
+#css-editor::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.2);
+  border: 5px solid transparent;
+  border-radius: 16px;
+  background-clip: padding-box;
+}
+
+#css-editor::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(0, 0, 0, 0.35);
+}
+
+#css-editor::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#css-editor::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+#css-editor::placeholder {
+  color: #9ca3af;
+  -webkit-text-fill-color: #9ca3af;
+}
+
+.buttons-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.cta-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 450;
+  transition: background-color 0.1s ease;
+  border: 1px solid;
+  flex: 1;
+  min-width: 0;
+  touch-action: manipulation;
+}
+
+.cta-github,
+.cta-support {
+  background-color: var(--primary-color);
+  color: white;
+  border-color: var(--primary-color);
+}
+
+.cta-github:hover,
+.cta-support:hover {
+  background-color: var(--primary-hover);
+}
+
+.cta-btn:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
+.cta-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .release-badge,
+  .slider,
+  .slider:before,
+  .icon-btn,
+  .cta-btn {
+    transition: none;
+  }
+}
