@@ -4,6 +4,11 @@ Chrome extension (Manifest V3) to inject custom CSS per domain — including ifr
 
 **Version:** 2.1.2
 
+## Compatibility
+
+- Chrome 111 or newer is required.
+- Custom CSS is stored per exact hostname, so `example.com` and `www.example.com` can have separate styles.
+
 ## Install (Chrome Web Store)
 
 [Install Custom CSS Injector on the Chrome Web Store](https://chromewebstore.google.com/detail/jafljompklilfgjfcdcmmkgdamolfpbi)
