@@ -4,6 +4,10 @@ Chrome extension (Manifest V3) to inject custom CSS per domain — including ifr
 
 **Version:** 2.1.1
 
+## Install (Chrome Web Store)
+
+[Install Custom CSS Injector on the Chrome Web Store](https://chromewebstore.google.com/detail/jafljompklilfgjfcdcmmkgdamolfpbi)
+
 ## Install (development)
 
 1. Clone this repository
