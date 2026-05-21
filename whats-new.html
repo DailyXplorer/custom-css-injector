@@ -33,6 +33,14 @@
         <h3>Reliability</h3>
         <ul>
           <li>Live CSS apply from the popup now rejects mismatched host messages, which avoids applying styles on the wrong frame in complex iframe setups.</li>
+          <li>The extension no longer injects content scripts on Chrome Web Store and Microsoft Edge Add-ons pages, matching the popup's unsupported-page handling.</li>
+        </ul>
+      </section>
+
+      <section class="release-section">
+        <h3>Compatibility</h3>
+        <ul>
+          <li>Chrome 111 is now the minimum supported version, matching the Manifest V3 APIs used for early injection and Shadow DOM coverage.</li>
         </ul>
       </section>
     </article>
