@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Custom CSS Injector – custom styles per domain",
-  "version": "2.1.2",
+  "version": "2.1.4",
   "description": "Inject custom CSS per domain. A minimalist, ultra-efficient extension to style any website without bloat or heavy features.",
   "minimum_chrome_version": "111",
-  "permissions": ["storage", "tabs", "scripting", "activeTab"],
+  "permissions": ["storage", "scripting", "activeTab"],
   "content_security_policy": {
     "extension_pages": "default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'none';"
   },
