@@ -1,5 +1,6 @@
 AGENTS.md
 
+.claude/
 .DS_Store
 **/.DS_Store
 Thumbs.db
@@ -15,3 +16,5 @@ yarn-error.log*
 *.log
 .env
 .env.*
+dist/
+skills-lock.json
