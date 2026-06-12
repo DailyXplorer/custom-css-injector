@@ -1,19 +1,14 @@
 (function (root) {
   'use strict';
 
-  const localTextEncoder = typeof TextEncoder === 'function' ? new TextEncoder() : null;
-
-  function getUtils() {
-    return typeof root.CSSInjectorUtils !== 'undefined' ? root.CSSInjectorUtils : null;
+  const utils = root.CSSInjectorUtils;
+  if (!utils) {
+    console.error('[CSS Injector] Missing CSSInjectorUtils (utils.js).');
+    return;
   }
 
-  function isPlainObject(value) {
-    const u = getUtils();
-    if (u && typeof u.isPlainObject === 'function') {
-      return u.isPlainObject(value);
-    }
-    return !!value && typeof value === 'object' && !Array.isArray(value);
-  }
+  const isPlainObject = utils.isPlainObject;
+  const estimateStorageUsage = utils.estimateStorageUsage;
 
   function normalizeHostname(value) {
     if (typeof value !== 'string') return null;
@@ -186,40 +181,6 @@
       ...Object.keys(leftItems || {}),
       ...Object.keys(rightItems || {})
     ]));
-  }
-
-  function getUtf8Size(value) {
-    const u = getUtils();
-    if (u && typeof u.getUtf8Size === 'function') {
-      return u.getUtf8Size(value);
-    }
-    const text = String(value);
-    if (localTextEncoder) {
-      return localTextEncoder.encode(text).length;
-    }
-    try {
-      return unescape(encodeURIComponent(text)).length;
-    } catch {
-      return text.length;
-    }
-  }
-
-  function estimateStorageUsage(items) {
-    const u = getUtils();
-    if (u && typeof u.estimateStorageUsage === 'function') {
-      return u.estimateStorageUsage(items);
-    }
-    let totalBytes = 0;
-    let maxItemBytes = 0;
-    for (const [key, value] of Object.entries(items || {})) {
-      const serializedValue = JSON.stringify(value);
-      const itemBytes = getUtf8Size(key) + getUtf8Size(serializedValue);
-      totalBytes += itemBytes;
-      if (itemBytes > maxItemBytes) {
-        maxItemBytes = itemBytes;
-      }
-    }
-    return { totalBytes, maxItemBytes };
   }
 
   function assertStorageLimits(items, limits) {

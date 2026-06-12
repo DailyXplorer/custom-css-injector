@@ -28,22 +28,43 @@ function getHostnameFromUrl(url) {
   }
 }
 
-function getTab(tabId) {
-  return new Promise((resolve, reject) => {
-    if (typeof tabId !== 'number') {
-      resolve(null);
-      return;
-    }
+const TOP_FRAME_HOST_RETRY_DELAYS_MS = [150, 400];
 
-    chrome.tabs.get(tabId, (tab) => {
-      const error = chrome.runtime.lastError;
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve(tab || null);
-    });
+function sendHostRequestToTopFrame(tabId) {
+  return new Promise((resolve) => {
+    try {
+      chrome.tabs.sendMessage(tabId, { type: 'context:getHost' }, { frameId: 0 }, (response) => {
+        if (chrome.runtime.lastError) {
+          resolve(null);
+          return;
+        }
+        resolve(
+          response && response.ok === true && typeof response.host === 'string' && response.host
+            ? response.host
+            : null
+        );
+      });
+    } catch {
+      resolve(null);
+    }
   });
+}
+
+async function requestHostFromTopFrame(tabId) {
+  if (typeof tabId !== 'number') {
+    return null;
+  }
+
+  let host = await sendHostRequestToTopFrame(tabId);
+  for (const delayMs of TOP_FRAME_HOST_RETRY_DELAYS_MS) {
+    if (host) {
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    host = await sendHostRequestToTopFrame(tabId);
+  }
+
+  return host;
 }
 
 async function getTopHostFromSender(sender) {
@@ -59,8 +80,7 @@ async function getTopHostFromSender(sender) {
     return null;
   }
 
-  const tab = await getTab(senderTabId);
-  return getHostnameFromUrl(tab && typeof tab.url === 'string' ? tab.url : null);
+  return requestHostFromTopFrame(senderTabId);
 }
 
 async function migrateLegacyStorageBody() {
