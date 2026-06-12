@@ -22,13 +22,21 @@
   const BRIDGE_MARKER_ATTRIBUTE = 'data-css-injector-shadow-bridge';
 
   const trackedShadowRoots = new Set();
+  const closedShadowRootRefs = new Set();
+  const closedShadowRootSeen = new WeakSet();
   const shadowStyleCache = new WeakMap();
   const shadowRootObservers = new WeakMap();
   const shadowRootDisconnectedSince = new WeakMap();
   const DISCONNECTED_SHADOW_ROOT_RETENTION_MS = 30000;
+  const CLOSED_SHADOW_ROOT_PRUNE_INTERVAL = 256;
+  const RECOVERY_WINDOW_MS = 1000;
+  const MAX_RECOVERIES_PER_WINDOW = 5;
 
   let documentObserver = null;
   let recoveryScheduled = false;
+  let recoveryWindowStart = 0;
+  let recoveryCountInWindow = 0;
+  let closedShadowRootAddsSincePrune = 0;
   let fullShadowDiscoveryDone = false;
   let currentState = {
     active: false,
@@ -249,8 +257,48 @@
     }
   }
 
+  function pruneClosedShadowRootRefs() {
+    for (const ref of Array.from(closedShadowRootRefs)) {
+      if (!ref.deref()) {
+        closedShadowRootRefs.delete(ref);
+      }
+    }
+  }
+
+  function trackClosedShadowRoot(shadowRoot) {
+    if (closedShadowRootSeen.has(shadowRoot)) return;
+
+    closedShadowRootSeen.add(shadowRoot);
+    closedShadowRootRefs.add(new WeakRef(shadowRoot));
+
+    closedShadowRootAddsSincePrune += 1;
+    if (closedShadowRootAddsSincePrune >= CLOSED_SHADOW_ROOT_PRUNE_INTERVAL) {
+      closedShadowRootAddsSincePrune = 0;
+      pruneClosedShadowRootRefs();
+    }
+  }
+
+  function restoreClosedShadowRoots() {
+    for (const ref of Array.from(closedShadowRootRefs)) {
+      const shadowRoot = ref.deref();
+      if (!shadowRoot) {
+        closedShadowRootRefs.delete(ref);
+        continue;
+      }
+      registerShadowRoot(shadowRoot);
+    }
+  }
+
   function registerShadowRoot(shadowRoot) {
     if (!isShadowRoot(shadowRoot)) return;
+
+    if (shadowRoot.mode === 'closed') {
+      trackClosedShadowRoot(shadowRoot);
+    }
+
+    if (!currentState.active) {
+      return;
+    }
 
     const wasTracked = trackedShadowRoots.has(shadowRoot);
     trackedShadowRoots.add(shadowRoot);
@@ -259,10 +307,6 @@
       shadowRootDisconnectedSince.delete(shadowRoot);
     } else if (!shadowRootDisconnectedSince.has(shadowRoot)) {
       shadowRootDisconnectedSince.set(shadowRoot, Date.now());
-    }
-
-    if (!currentState.active) {
-      return;
     }
 
     ensureManagedStyle(shadowRoot, currentState.host, currentState.css, currentState.attribute);
@@ -284,6 +328,7 @@
 
     ensureDocumentObserver();
     ensureInitialShadowDiscovery();
+    restoreClosedShadowRoots();
     cleanupDisconnectedRoots();
 
     for (const shadowRoot of Array.from(trackedShadowRoots)) {
@@ -304,10 +349,23 @@
     if (recoveryScheduled || !currentState.active) return;
 
     recoveryScheduled = true;
-    queueMicrotask(() => {
+    const now = Date.now();
+    if (now - recoveryWindowStart > RECOVERY_WINDOW_MS) {
+      recoveryWindowStart = now;
+      recoveryCountInWindow = 0;
+    }
+    recoveryCountInWindow += 1;
+
+    const runRecovery = () => {
       recoveryScheduled = false;
       applyCurrentStateToAllShadowRoots();
-    });
+    };
+
+    if (recoveryCountInWindow > MAX_RECOVERIES_PER_WINDOW) {
+      setTimeout(runRecovery, RECOVERY_WINDOW_MS);
+    } else {
+      queueMicrotask(runRecovery);
+    }
   }
 
   function handleShadowRootMutations(shadowRoot, mutations) {
@@ -396,6 +454,7 @@
     fullShadowDiscoveryDone = false;
     disconnectDocumentObserver();
     disconnectShadowRootObservers();
+    trackedShadowRoots.clear();
   }
 
   function patchAttachShadow() {
@@ -433,6 +492,18 @@
     }
 
     try {
+      Object.defineProperty(wrappedAttachShadow, 'length', {
+        value: originalAttachShadow.length,
+        configurable: true
+      });
+      Object.defineProperty(wrappedAttachShadow, 'name', {
+        value: originalAttachShadow.name,
+        configurable: true
+      });
+    } catch {
+    }
+
+    try {
       elementPrototype.attachShadow = wrappedAttachShadow;
     } catch {
     }
@@ -464,11 +535,11 @@
     }
 
     if (detail.type === 'clear') {
+      removeCurrentHostFromTrackedShadowRoots(host, attribute);
       if (currentState.host === host) {
         currentState = { active: false, host, css: '', attribute };
         deactivateCurrentState();
       }
-      removeCurrentHostFromTrackedShadowRoots(host, attribute);
     }
   }
 

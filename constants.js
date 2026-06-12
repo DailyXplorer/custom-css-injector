@@ -31,8 +31,8 @@
       ERROR: '#e74c3c'
     },
 
-    SELECTORS: {
-      CSS_INJECTOR_STYLE: 'style[data-css-injector="{hostname}"]'
+    STYLE: {
+      DATA_ATTRIBUTE: 'data-css-injector'
     }
   };
 })();

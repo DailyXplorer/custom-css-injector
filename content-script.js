@@ -32,20 +32,14 @@
     }
   }
 
-  function getCurrentHostname() {
-    return getFrameHostname();
-  }
-
   function getStyleDataAttributeName() {
-    if (typeof CSSInjectorConstants === 'undefined' ||
-        !CSSInjectorConstants.SELECTORS ||
-        typeof CSSInjectorConstants.SELECTORS.CSS_INJECTOR_STYLE !== 'string') {
-      return 'data-css-injector';
+    if (typeof CSSInjectorConstants !== 'undefined' &&
+        CSSInjectorConstants.STYLE &&
+        typeof CSSInjectorConstants.STYLE.DATA_ATTRIBUTE === 'string' &&
+        CSSInjectorConstants.STYLE.DATA_ATTRIBUTE) {
+      return CSSInjectorConstants.STYLE.DATA_ATTRIBUTE;
     }
-
-    const selectorTemplate = CSSInjectorConstants.SELECTORS.CSS_INJECTOR_STYLE;
-    const match = selectorTemplate.match(/\[([^=\]]+)=/);
-    return match ? match[1] : 'data-css-injector';
+    return 'data-css-injector';
   }
 
   const STYLE_DATA_ATTRIBUTE = getStyleDataAttributeName();
@@ -58,16 +52,10 @@
     node: null
   };
 
-  const managedShadowRoots = new Set();
-  const managedShadowStyleCache = new WeakMap();
-  const managedShadowRootObservers = new WeakMap();
-
   const topHostCache = {
     host: null,
     timestamp: 0
   };
-
-  let fullShadowDiscoveryDone = false;
 
   function isTopFrame() {
     try {
@@ -174,12 +162,12 @@
     return resolvedHostname;
   }
 
-  function getInjectedStylesForHostname(hostname, rootNode = document) {
-    if (!hostname || typeof hostname !== 'string' || !rootNode || typeof rootNode.querySelectorAll !== 'function') {
+  function getInjectedStylesForHostname(hostname) {
+    if (!hostname || typeof hostname !== 'string') {
       return [];
     }
 
-    const styles = rootNode.querySelectorAll(STYLE_SELECTOR);
+    const styles = document.querySelectorAll(STYLE_SELECTOR);
     return Array.from(styles).filter((styleNode) => (
       styleNode &&
       typeof styleNode.getAttribute === 'function' &&
@@ -195,7 +183,7 @@
       return managedStyleCache.node;
     }
 
-    const matchingStyles = getInjectedStylesForHostname(hostname, document);
+    const matchingStyles = getInjectedStylesForHostname(hostname);
     if (!matchingStyles.length) return null;
 
     if (matchingStyles.length > 1) {
@@ -223,7 +211,7 @@
     }
 
     if (retries > 0) {
-      requestAnimationFrame(() => attachManagedStyle(style, retries - 1));
+      setTimeout(() => attachManagedStyle(style, retries - 1), 16);
     }
   }
 
@@ -243,193 +231,6 @@
     managedStyleCache.node = style;
     attachManagedStyle(style);
     return style;
-  }
-
-  function isElementNode(node) {
-    return !!node && node.nodeType === 1;
-  }
-
-  function isShadowRoot(rootNode) {
-    return !!rootNode &&
-      rootNode.nodeType === 11 &&
-      !!rootNode.host &&
-      typeof rootNode.appendChild === 'function';
-  }
-
-  function isShadowRootConnected(shadowRoot) {
-    if (!isShadowRoot(shadowRoot)) return false;
-    const host = shadowRoot.host;
-    return !host || host.isConnected !== false;
-  }
-
-  function cleanupManagedShadowRoots() {
-    for (const shadowRoot of Array.from(managedShadowRoots)) {
-      if (isShadowRootConnected(shadowRoot)) {
-        continue;
-      }
-
-      const observer = managedShadowRootObservers.get(shadowRoot);
-      if (observer) {
-        observer.disconnect();
-        managedShadowRootObservers.delete(shadowRoot);
-      }
-      managedShadowStyleCache.delete(shadowRoot);
-      managedShadowRoots.delete(shadowRoot);
-    }
-  }
-
-  function getInjectedShadowStyle(shadowRoot, hostname) {
-    if (!isShadowRootConnected(shadowRoot) || !hostname) return null;
-
-    const cached = managedShadowStyleCache.get(shadowRoot);
-    if (cached &&
-        cached.host === hostname &&
-        cached.node &&
-        cached.node.isConnected &&
-        cached.node.getAttribute(STYLE_DATA_ATTRIBUTE) === hostname) {
-      return cached.node;
-    }
-
-    const matchingStyles = getInjectedStylesForHostname(hostname, shadowRoot);
-    if (!matchingStyles.length) {
-      managedShadowStyleCache.delete(shadowRoot);
-      return null;
-    }
-
-    if (matchingStyles.length > 1) {
-      for (let index = 1; index < matchingStyles.length; index++) {
-        matchingStyles[index].remove();
-      }
-    }
-
-    const style = matchingStyles[0];
-    managedShadowStyleCache.set(shadowRoot, { host: hostname, node: style });
-    return style;
-  }
-
-  function attachManagedShadowStyle(shadowRoot, style) {
-    if (!isShadowRootConnected(shadowRoot) || !style) return;
-
-    if (style.parentNode !== shadowRoot || shadowRoot.lastElementChild !== style) {
-      shadowRoot.appendChild(style);
-    }
-  }
-
-  function ensureManagedShadowStyle(shadowRoot, hostname, cssContent) {
-    if (!isShadowRootConnected(shadowRoot) || !hostname || typeof cssContent !== 'string') {
-      return null;
-    }
-
-    let style = getInjectedShadowStyle(shadowRoot, hostname);
-    if (!style) {
-      style = document.createElement('style');
-      style.setAttribute(STYLE_DATA_ATTRIBUTE, hostname);
-      style.setAttribute('data-css-injector-priority', 'user');
-      managedShadowStyleCache.set(shadowRoot, { host: hostname, node: style });
-    } else {
-      style.setAttribute(STYLE_DATA_ATTRIBUTE, hostname);
-    }
-
-    if (style.textContent !== cssContent) {
-      style.textContent = cssContent;
-    }
-
-    attachManagedShadowStyle(shadowRoot, style);
-    ensureManagedShadowRootObserver(shadowRoot);
-    return style;
-  }
-
-  function removeInjectedStylesFromShadowRoot(shadowRoot, hostname) {
-    if (!isShadowRoot(shadowRoot) || !hostname) return;
-
-    const cached = managedShadowStyleCache.get(shadowRoot);
-    if (cached && cached.host === hostname && cached.node) {
-      cached.node.remove();
-      managedShadowStyleCache.delete(shadowRoot);
-    }
-
-    getInjectedStylesForHostname(hostname, shadowRoot).forEach((styleNode) => styleNode.remove());
-  }
-
-  function discoverShadowRootsFromElement(element) {
-    if (!isElementNode(element)) return;
-
-    try {
-      if (element.shadowRoot) {
-        registerShadowRoot(element.shadowRoot);
-      }
-    } catch {
-    }
-
-    if (typeof element.querySelectorAll !== 'function') return;
-
-    let descendants;
-    try {
-      descendants = element.querySelectorAll('*');
-    } catch {
-      return;
-    }
-
-    for (const descendant of descendants) {
-      try {
-        if (descendant.shadowRoot) {
-          registerShadowRoot(descendant.shadowRoot);
-        }
-      } catch {
-      }
-    }
-  }
-
-  function discoverShadowRootsInTree(rootNode) {
-    if (!rootNode || typeof rootNode.querySelectorAll !== 'function') return;
-
-    let elements;
-    try {
-      elements = rootNode.querySelectorAll('*');
-    } catch {
-      return;
-    }
-
-    for (const element of elements) {
-      try {
-        if (element.shadowRoot) {
-          registerShadowRoot(element.shadowRoot);
-        }
-      } catch {
-      }
-    }
-  }
-
-  function registerShadowRoot(shadowRoot) {
-    if (!isShadowRootConnected(shadowRoot)) return;
-
-    const wasTracked = managedShadowRoots.has(shadowRoot);
-    managedShadowRoots.add(shadowRoot);
-
-    if (lastApplied.shouldHaveStyle === true && lastApplied.host && lastApplied.css) {
-      ensureManagedShadowStyle(shadowRoot, lastApplied.host, lastApplied.css);
-    }
-
-    ensureManagedShadowRootObserver(shadowRoot);
-
-    if (!wasTracked) {
-      discoverShadowRootsInTree(shadowRoot);
-    }
-  }
-
-  function ensureInitialShadowDiscovery() {
-    if (fullShadowDiscoveryDone) return;
-    fullShadowDiscoveryDone = true;
-    discoverShadowRootsInTree(document);
-  }
-
-  function applyCSSInShadowRoots(hostname, cssContent) {
-    cleanupManagedShadowRoots();
-    ensureInitialShadowDiscovery();
-
-    for (const shadowRoot of Array.from(managedShadowRoots)) {
-      ensureManagedShadowStyle(shadowRoot, hostname, cssContent);
-    }
   }
 
   function dispatchShadowBridgeMessage(type, hostname, cssContent = '') {
@@ -452,13 +253,8 @@
   }
 
   function removeInjectedStyles(hostname) {
-    const matchingStyles = getInjectedStylesForHostname(hostname, document);
+    const matchingStyles = getInjectedStylesForHostname(hostname);
     matchingStyles.forEach((styleNode) => styleNode.remove());
-
-    cleanupManagedShadowRoots();
-    for (const shadowRoot of Array.from(managedShadowRoots)) {
-      removeInjectedStylesFromShadowRoot(shadowRoot, hostname);
-    }
 
     dispatchShadowBridgeMessage('clear', hostname);
 
@@ -480,7 +276,6 @@
         style.textContent = cssContent;
       }
       attachManagedStyle(style);
-      applyCSSInShadowRoots(hostname, cssContent);
       dispatchShadowBridgeMessage('apply', hostname, cssContent);
     } catch (error) {
       console.error('[CSS Injector] Failed to inject CSS:', error);
@@ -519,12 +314,16 @@
 
   let lastApplied = { href: '', host: '', path: '', css: '', shouldHaveStyle: false, effectKey: '' };
   let pendingTimer = null;
-  let pendingFrameId = 0;
+  let pendingScheduleTimer = null;
   let pendingForcedLoad = false;
   let pendingForcedReload = false;
   let latestLoadRequestId = 0;
   let styleGuardScheduled = false;
   let styleGuardObserver = null;
+  let styleGuardRecoveryWindowStart = 0;
+  let styleGuardRecoveryCount = 0;
+  const STYLE_GUARD_RECOVERY_WINDOW_MS = 1000;
+  const STYLE_GUARD_MAX_RECOVERIES_PER_WINDOW = 5;
 
   function getErrorMessage(error, fallbackMessage) {
     if (typeof CSSInjectorUtils !== 'undefined' &&
@@ -596,7 +395,14 @@
     }
 
     styleGuardScheduled = true;
-    queueMicrotask(() => {
+    const now = Date.now();
+    if (now - styleGuardRecoveryWindowStart > STYLE_GUARD_RECOVERY_WINDOW_MS) {
+      styleGuardRecoveryWindowStart = now;
+      styleGuardRecoveryCount = 0;
+    }
+    styleGuardRecoveryCount += 1;
+
+    const runRecovery = () => {
       styleGuardScheduled = false;
 
       const hostname = lastApplied.host;
@@ -610,7 +416,13 @@
       }
 
       scheduleInjection(true, true);
-    });
+    };
+
+    if (styleGuardRecoveryCount > STYLE_GUARD_MAX_RECOVERIES_PER_WINDOW) {
+      setTimeout(runRecovery, STYLE_GUARD_RECOVERY_WINDOW_MS);
+    } else {
+      queueMicrotask(runRecovery);
+    }
   }
 
   function nodeContainsStylesheet(node) {
@@ -629,19 +441,14 @@
 
   function handleManagedStyleMutations(mutations) {
     const hostname = lastApplied.host;
-    const shouldMaintain = shouldMaintainManagedStyle(hostname);
+    if (!shouldMaintainManagedStyle(hostname)) {
+      return;
+    }
+
     const cachedStyle = managedStyleCache.host === hostname ? managedStyleCache.node : null;
 
     for (const mutation of mutations) {
       if (mutation.type !== 'childList') {
-        continue;
-      }
-
-      for (const addedNode of mutation.addedNodes) {
-        discoverShadowRootsFromElement(addedNode);
-      }
-
-      if (!shouldMaintain) {
         continue;
       }
 
@@ -687,77 +494,13 @@
     styleGuardObserver = null;
   }
 
-  function handleManagedShadowRootMutations(shadowRoot, mutations) {
-    let shouldRecover = false;
-
-    for (const mutation of mutations) {
-      if (mutation.type !== 'childList') {
-        continue;
-      }
-
-      for (const addedNode of mutation.addedNodes) {
-        discoverShadowRootsFromElement(addedNode);
-      }
-
-      const hostname = lastApplied.host;
-      if (!shouldMaintainManagedStyle(hostname)) {
-        continue;
-      }
-
-      const cached = managedShadowStyleCache.get(shadowRoot);
-      if (!cached || !cached.node || !cached.node.isConnected) {
-        shouldRecover = true;
-        continue;
-      }
-
-      if (mutation.target === shadowRoot &&
-          shadowRoot.lastElementChild !== cached.node &&
-          Array.from(mutation.addedNodes).some(nodeContainsStylesheet)) {
-        shouldRecover = true;
-      }
-    }
-
-    if (shouldRecover) {
-      queueManagedStyleRecovery();
-    }
-  }
-
-  function ensureManagedShadowRootObserver(shadowRoot) {
-    if (!isShadowRootConnected(shadowRoot) || managedShadowRootObservers.has(shadowRoot) || typeof MutationObserver === 'undefined') {
-      return;
-    }
-
-    const observer = new MutationObserver((mutations) => handleManagedShadowRootMutations(shadowRoot, mutations));
-    observer.observe(shadowRoot, {
-      childList: true,
-      subtree: true
-    });
-    managedShadowRootObservers.set(shadowRoot, observer);
-  }
-
-  function disconnectManagedShadowRootObservers() {
-    for (const shadowRoot of Array.from(managedShadowRoots)) {
-      const observer = managedShadowRootObservers.get(shadowRoot);
-      if (observer) {
-        observer.disconnect();
-        managedShadowRootObservers.delete(shadowRoot);
-      }
-    }
-  }
-
   function syncManagedStyleObserver() {
-    const hostname = lastApplied.host;
-    if (shouldMaintainManagedStyle(hostname)) {
+    if (shouldMaintainManagedStyle(lastApplied.host)) {
       ensureManagedStyleObserver();
-      ensureInitialShadowDiscovery();
-      for (const shadowRoot of Array.from(managedShadowRoots)) {
-        ensureManagedShadowRootObserver(shadowRoot);
-      }
       return;
     }
 
     disconnectManagedStyleObserver();
-    disconnectManagedShadowRootObservers();
   }
 
   function isExtensionContextValid() {
@@ -821,6 +564,11 @@
         return;
       }
 
+      const previousHost = lastApplied.host;
+      if (previousHost && previousHost !== hostname) {
+        removeInjectedStyles(previousHost);
+      }
+
       if (css && isEnabled) {
         injectCSS(css, hostname);
       } else {
@@ -863,10 +611,10 @@
       pendingForcedReload = pendingForcedReload || forceReload;
     }
 
-    if (pendingFrameId) return;
+    if (pendingScheduleTimer !== null) return;
 
-    pendingFrameId = requestAnimationFrame(() => {
-      pendingFrameId = 0;
+    pendingScheduleTimer = setTimeout(() => {
+      pendingScheduleTimer = null;
 
       const shouldForceLoad = pendingForcedLoad;
       const shouldForceReload = pendingForcedReload;
@@ -886,7 +634,7 @@
       if (meaningfulUrlChange) {
         debouncedLoad();
       }
-    });
+    }, 0);
   }
 
   contentScriptRuntime.requestRefresh = scheduleInjection;
@@ -901,24 +649,6 @@
 
   checkAndInject(true);
 
-  function hookHistoryMethod(methodName) {
-    if (!window.history || typeof window.history[methodName] !== 'function') return;
-    if (window.history[methodName]._cssInjectorWrapped) return;
-
-    const original = window.history[methodName];
-    const wrapped = function (...args) {
-      const result = original.apply(this, args);
-      checkAndInject();
-      return result;
-    };
-
-    wrapped._cssInjectorWrapped = true;
-    window.history[methodName] = wrapped;
-  }
-
-  hookHistoryMethod('pushState');
-  hookHistoryMethod('replaceState');
-
   window.addEventListener('popstate', () => checkAndInject());
   window.addEventListener('hashchange', () => checkAndInject());
 
@@ -931,8 +661,42 @@
     window.navigation.addEventListener('navigate', () => checkAndInject());
   }
 
+  function isStorageChangeRelevant(changes) {
+    const candidateHosts = new Set();
+
+    const frameHostname = getFrameHostname();
+    if (frameHostname) candidateHosts.add(frameHostname);
+    if (lastApplied.host) candidateHosts.add(lastApplied.host);
+    if (topHostCache.host) candidateHosts.add(topHostCache.host);
+
+    if (!isTopFrame()) {
+      const fastTopHostname = getAccessibleTopHostname() || getTopHostnameFromAncestorOrigins();
+      if (fastTopHostname) {
+        candidateHosts.add(fastTopHostname);
+      } else {
+        // Cross-origin subframe whose top host is only resolvable asynchronously:
+        // even a "fresh" topHostCache may be wrong (e.g. the parent navigated and
+        // nothing invalidated the cache), so never filter here. The async
+        // resolveManagedHostname(true) in handleStorageChanges is authoritative
+        // and only re-applies CSS when the change matches the resolved host.
+        return true;
+      }
+    }
+
+    if (candidateHosts.size === 0) return true;
+
+    for (const host of candidateHosts) {
+      if (changes[host] || changes[`${host}_enabled`]) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   async function handleStorageChanges(changes, namespace) {
     if (namespace !== 'local') return;
+    if (!isStorageChangeRelevant(changes)) return;
 
     const hostname = await resolveManagedHostname(true);
     if (!hostname) return;
@@ -957,7 +721,7 @@
     }
   }
 
-  const VALID_MESSAGE_TYPES = new Set(['css:apply', 'css:clear']);
+  const VALID_MESSAGE_TYPES = new Set(['css:apply', 'css:clear', 'context:getHost']);
 
   async function handleRuntimeMessage(msg, sender) {
     if (!msg || typeof msg.type !== 'string') {
@@ -968,6 +732,13 @@
     }
     if (!isTrustedSender(sender)) {
       return { ok: false, error: 'Untrusted sender' };
+    }
+
+    if (msg.type === 'context:getHost') {
+      const frameHostname = getFrameHostname();
+      return frameHostname
+        ? { ok: true, host: frameHostname }
+        : { ok: false, error: 'Missing hostname' };
     }
 
     const hostname = await resolveManagedHostname(true);

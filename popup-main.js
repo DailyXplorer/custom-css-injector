@@ -7,44 +7,15 @@ async function getActiveTab() {
 }
 
 function getHostname(url) {
-  if (cssInjectorUtils && typeof cssInjectorUtils.getHostname === 'function') {
-    return cssInjectorUtils.getHostname(url);
-  }
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return null;
-  }
+  return cssInjectorUtils ? cssInjectorUtils.getHostname(url) : null;
 }
 
 function getProtocol(url) {
-  if (cssInjectorUtils && typeof cssInjectorUtils.getProtocol === 'function') {
-    return cssInjectorUtils.getProtocol(url);
-  }
-  try {
-    return new URL(url).protocol;
-  } catch {
-    return null;
-  }
+  return cssInjectorUtils ? cssInjectorUtils.getProtocol(url) : null;
 }
 
 function isScriptableUrl(url) {
-  if (cssInjectorUtils && typeof cssInjectorUtils.isScriptableUrl === 'function') {
-    return cssInjectorUtils.isScriptableUrl(url);
-  }
-  if (!url) return false;
-  try {
-    const u = new URL(url);
-    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
-    const h = u.hostname;
-    const p = u.pathname;
-    if (h === 'chrome.google.com' && p.startsWith('/webstore')) return false;
-    if (h === 'chromewebstore.google.com') return false;
-    if (h === 'microsoftedge.microsoft.com' && p.includes('/addons')) return false;
-    return true;
-  } catch {
-    return false;
-  }
+  return cssInjectorUtils ? cssInjectorUtils.isScriptableUrl(url) : false;
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -122,8 +93,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     ? CSSInjectorPopupStorageHelpers
     : null;
 
-  if (!storageHelpers) {
-    console.error('[CSS Injector] Missing CSSInjectorPopupStorageHelpers (popup-storage-helpers.js).');
+  if (!storageHelpers || !cssInjectorUtils) {
+    console.error('[CSS Injector] Missing popup dependencies (utils.js / popup-storage-helpers.js).');
     return;
   }
 
@@ -144,17 +115,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   let queuedPersistWriteCount = 0;
 
   function countEditorLines(value) {
-    if (cssInjectorUtils && typeof cssInjectorUtils.countLines === 'function') {
-      return cssInjectorUtils.countLines(value);
-    }
-    const text = typeof value === 'string' ? value : '';
-    let lineCount = 1;
-    for (let index = 0; index < text.length; index++) {
-      if (text.charCodeAt(index) === 10) {
-        lineCount += 1;
-      }
-    }
-    return lineCount;
+    return cssInjectorUtils.countLines(value);
   }
 
   function setLineNumbersText(lineCount) {
@@ -412,17 +373,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     iconElement.removeAttribute('data-src');
   }
 
+  const buttonFeedbackState = new WeakMap();
+
   function flashButtonSuccess(buttonElement, iconElement, fallbackSource) {
     if (!buttonElement || !iconElement) return;
 
-    const originalSource = getIconSource(iconElement) || fallbackSource || '';
+    let feedback = buttonFeedbackState.get(buttonElement);
+    if (feedback) {
+      clearTimeout(feedback.timer);
+    } else {
+      feedback = { originalSource: getIconSource(iconElement) || fallbackSource || '' };
+      buttonFeedbackState.set(buttonElement, feedback);
+    }
+
     buttonElement.setAttribute('aria-pressed', 'true');
     setIconSource(iconElement, 'assets/icons/check.svg');
     buttonElement.style.color = 'var(--success-color)';
 
-    setTimeout(() => {
-      if (originalSource) {
-        setIconSource(iconElement, originalSource);
+    feedback.timer = setTimeout(() => {
+      buttonFeedbackState.delete(buttonElement);
+      if (feedback.originalSource) {
+        setIconSource(iconElement, feedback.originalSource);
       }
       buttonElement.style.color = '';
       buttonElement.setAttribute('aria-pressed', 'false');
@@ -610,104 +581,35 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function createHostState(host, css, enabled) {
-    if (cssInjectorUtils && typeof cssInjectorUtils.createHostState === 'function') {
-      return cssInjectorUtils.createHostState(host, css, enabled);
-    }
-    return {
-      host,
-      css: typeof css === 'string' ? css : '',
-      enabled: enabled !== false
-    };
+    return cssInjectorUtils.createHostState(host, css, enabled);
   }
 
   function extractHostStateFromStorage(host, data) {
-    if (cssInjectorUtils && typeof cssInjectorUtils.extractHostStateFromStorage === 'function') {
-      return cssInjectorUtils.extractHostStateFromStorage(host, data);
-    }
-    const items = storageHelpers.isPlainObject(data) ? data : {};
-    return createHostState(
-      host,
-      typeof items[host] === 'string' ? items[host] : '',
-      items[`${host}_enabled`] !== false
-    );
+    return cssInjectorUtils.extractHostStateFromStorage(host, data);
   }
 
   function getHostStateItems(state) {
-    if (cssInjectorUtils && typeof cssInjectorUtils.getHostStateItems === 'function') {
-      return cssInjectorUtils.getHostStateItems(state);
-    }
-    return {
-      [state.host]: state.css,
-      [`${state.host}_enabled`]: state.enabled
-    };
+    return cssInjectorUtils.getHostStateItems(state);
   }
 
   function isSameSavedState(leftState, rightState) {
-    if (cssInjectorUtils && typeof cssInjectorUtils.isSameHostState === 'function') {
-      return cssInjectorUtils.isSameHostState(leftState, rightState);
-    }
-    return !!leftState &&
-      !!rightState &&
-      leftState.css === rightState.css &&
-      leftState.enabled === rightState.enabled;
+    return cssInjectorUtils.isSameHostState(leftState, rightState);
   }
 
   function getErrorMessage(error) {
-    if (cssInjectorUtils && typeof cssInjectorUtils.getErrorMessage === 'function') {
-      return cssInjectorUtils.getErrorMessage(error);
-    }
-    if (error && typeof error.message === 'string' && error.message.trim()) {
-      return error.message.trim();
-    }
-    return 'Unknown error';
+    return cssInjectorUtils.getErrorMessage(error);
   }
 
-  async function storageGet(keys) {
-    if (cssInjectorUtils && typeof cssInjectorUtils.storageGet === 'function') {
-      return cssInjectorUtils.storageGet(STORAGE_AREA, keys, STORAGE_TIMEOUT_MS);
-    }
-    return new Promise((resolve, reject) => {
-      chrome.storage.local.get(keys, (items) => {
-        const err = chrome.runtime.lastError;
-        if (err) {
-          reject(err);
-          return;
-        }
-        resolve(items || {});
-      });
-    });
+  function storageGet(keys) {
+    return cssInjectorUtils.storageGet(STORAGE_AREA, keys, STORAGE_TIMEOUT_MS);
   }
 
-  async function storageSet(items) {
-    if (cssInjectorUtils && typeof cssInjectorUtils.storageSet === 'function') {
-      return cssInjectorUtils.storageSet(STORAGE_AREA, items, STORAGE_TIMEOUT_MS);
-    }
-    return new Promise((resolve, reject) => {
-      chrome.storage.local.set(items, () => {
-        const err = chrome.runtime.lastError;
-        if (err) {
-          reject(err);
-          return;
-        }
-        resolve();
-      });
-    });
+  function storageSet(items) {
+    return cssInjectorUtils.storageSet(STORAGE_AREA, items, STORAGE_TIMEOUT_MS);
   }
 
-  async function storageRemove(keys) {
-    if (cssInjectorUtils && typeof cssInjectorUtils.storageRemove === 'function') {
-      return cssInjectorUtils.storageRemove(STORAGE_AREA, keys, STORAGE_TIMEOUT_MS);
-    }
-    return new Promise((resolve, reject) => {
-      chrome.storage.local.remove(keys, () => {
-        const err = chrome.runtime.lastError;
-        if (err) {
-          reject(err);
-          return;
-        }
-        resolve();
-      });
-    });
+  function storageRemove(keys) {
+    return cssInjectorUtils.storageRemove(STORAGE_AREA, keys, STORAGE_TIMEOUT_MS);
   }
 
   function hasPendingPersistence() {
@@ -839,9 +741,30 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       return true;
     } catch (error) {
+      if (pendingPayload === null) {
+        pendingPayload = payload;
+      }
       errorHandler.logError('flushPersistence', error);
       showConfigToast(getErrorMessage(error), 'error');
       return false;
+    }
+  }
+
+  function persistPendingStateImmediately() {
+    if (!pendingPayload || !pendingPayload.host) return;
+    const payload = pendingPayload;
+    try {
+      if (typeof chrome !== 'undefined' &&
+          chrome.storage &&
+          chrome.storage.local &&
+          typeof chrome.storage.local.set === 'function') {
+        chrome.storage.local.set({
+          [payload.host]: typeof payload.css === 'string' ? payload.css : '',
+          [`${payload.host}_enabled`]: payload.enabled !== false
+        });
+      }
+    } catch (error) {
+      errorHandler.logError('persistPendingStateImmediately', error);
     }
   }
 
@@ -879,6 +802,31 @@ document.addEventListener('DOMContentLoaded', async () => {
     return state;
   }
 
+  function requestTopFrameHost(tabId) {
+    return new Promise((resolve) => {
+      if (typeof tabId !== 'number') {
+        resolve(null);
+        return;
+      }
+
+      try {
+        chrome.tabs.sendMessage(tabId, { type: 'context:getHost' }, { frameId: 0 }, (response) => {
+          if (chrome.runtime.lastError) {
+            resolve(null);
+            return;
+          }
+          resolve(
+            response && response.ok === true && typeof response.host === 'string' && response.host
+              ? response.host
+              : null
+          );
+        });
+      } catch {
+        resolve(null);
+      }
+    });
+  }
+
   const loadCssForCurrentSite = async (options = {}) => {
     const { tabContext = null, flushPending = true } = options;
     const requestId = ++loadRequestId;
@@ -889,7 +837,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       const resolvedTabContext = tabContext || createTabContext(await getActiveTab());
       if (requestId !== loadRequestId) return;
 
-      if (!resolvedTabContext.url) {
+      if (!resolvedTabContext.url && !resolvedTabContext.host && typeof resolvedTabContext.id === 'number') {
+        const fallbackHost = await requestTopFrameHost(resolvedTabContext.id);
+        if (requestId !== loadRequestId) return;
+        if (fallbackHost) {
+          resolvedTabContext.host = fallbackHost;
+          resolvedTabContext.scriptable = true;
+        }
+      }
+
+      if (!resolvedTabContext.url && !resolvedTabContext.host) {
         updateUI({
           disabled: true,
           scriptable: false,
@@ -1174,6 +1131,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function setupEventHandlers() {
     function persistPendingStateOnClose() {
+      persistPendingStateImmediately();
       flushPersistence().catch((error) => {
         errorHandler.logError('persistPendingStateOnClose', error);
       });
@@ -1182,26 +1140,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     editor.addEventListener('input', () => {
       if (!currentHost || !currentTabScriptable || uiMutationLocked) return;
       applyEditorMutation(editor.value);
-    });
-
-    editor.addEventListener('paste', (e) => {
-      if (uiMutationLocked || editor.readOnly || editor.disabled) return;
-      if (!currentHost || !currentTabScriptable) return;
-      const clip = e.clipboardData || window.clipboardData;
-      if (!clip) return;
-      const text = clip.getData('text/plain');
-      if (text == null) return;
-      e.preventDefault();
-      const normalized = String(text).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-      const start = editor.selectionStart;
-      const end = editor.selectionEnd;
-      const nextCss = editor.value.slice(0, start) + normalized + editor.value.slice(end);
-      const cursor = start + normalized.length;
-      applyEditorMutation(nextCss, {
-        selectionStart: cursor,
-        selectionEnd: cursor
-      });
-      scheduleScrollbarMetricsUpdate(true);
+      scheduleScrollbarMetricsUpdate();
     });
 
     editor.addEventListener('blur', () => {
@@ -1236,6 +1175,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (e.key !== 'Tab') return;
 
       e.preventDefault();
+      if (typeof document.execCommand === 'function' && document.execCommand('insertText', false, '  ')) {
+        return;
+      }
+
       const start = editor.selectionStart;
       const end = editor.selectionEnd;
       const nextCss = editor.value.substring(0, start) + '  ' + editor.value.substring(end);
@@ -1286,6 +1229,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (!currentHost || !currentTabScriptable || uiMutationLocked) return;
       const tab = await getActiveTab();
       const ctx = createTabContext(tab);
+      if (!ctx.url && typeof ctx.id === 'number') {
+        const fallbackHost = await requestTopFrameHost(ctx.id);
+        if (fallbackHost) {
+          ctx.host = fallbackHost;
+          ctx.scriptable = true;
+        }
+      }
       if (ctx.id !== currentTabId || ctx.url !== currentTabUrl || ctx.host !== currentHost) {
         await loadCssForCurrentSite({ tabContext: ctx });
         return;
