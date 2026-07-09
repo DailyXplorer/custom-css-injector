@@ -85,21 +85,27 @@ async function getTopHostFromSender(sender) {
 
 async function migrateLegacyStorageBody() {
   try {
-    const marker = await new Promise((resolve) => {
+    const marker = await new Promise((resolve, reject) => {
       chrome.storage.local.get(MIGRATION_FLAG, (items) => {
-        resolve(items && items[MIGRATION_FLAG] === true);
+        const err = chrome.runtime.lastError;
+        if (err) reject(err);
+        else resolve(items && items[MIGRATION_FLAG] === true);
       });
     });
     if (marker) return;
 
-    const syncAll = await new Promise((resolve) => {
+    const syncAll = await new Promise((resolve, reject) => {
       chrome.storage.sync.get(null, (items) => {
-        resolve(items || {});
+        const err = chrome.runtime.lastError;
+        if (err) reject(err);
+        else resolve(items || {});
       });
     });
-    const localAll = await new Promise((resolve) => {
+    const localAll = await new Promise((resolve, reject) => {
       chrome.storage.local.get(null, (items) => {
-        resolve(items || {});
+        const err = chrome.runtime.lastError;
+        if (err) reject(err);
+        else resolve(items || {});
       });
     });
 

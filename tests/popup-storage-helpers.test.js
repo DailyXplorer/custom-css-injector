@@ -46,6 +46,26 @@ test('normalizeHostname rejects enabled-suffix hosts', () => {
   assert.equal(helpers.normalizeHostname('foo_enabled'), null);
 });
 
+test('normalizeHostname rejects the reserved internal namespace', () => {
+  assert.equal(helpers.normalizeHostname('__proto__'), null);
+  assert.equal(helpers.normalizeHostname('__internal.example'), null);
+});
+
+test('normalizeHostname rejects credentials and ports instead of retargeting them', () => {
+  assert.equal(helpers.normalizeHostname('user@example.com'), null);
+  assert.equal(helpers.normalizeHostname('user:pass@example.com'), null);
+  assert.equal(helpers.normalizeHostname('example.com:'), null);
+  assert.equal(helpers.normalizeHostname('example.com:80'), null);
+  assert.equal(helpers.normalizeHostname('example.com:443'), null);
+  assert.equal(helpers.normalizeHostname('[::1]:'), null);
+  assert.equal(helpers.normalizeHostname('[::1]:80'), null);
+  assert.equal(helpers.normalizeHostname('[::1]:8080'), null);
+});
+
+test('normalizeHostname accepts bracketed IPv6 hostnames', () => {
+  assert.equal(helpers.normalizeHostname('[::1]'), '[::1]');
+});
+
 test('normalizeHostname accepts IP hosts', () => {
   assert.equal(helpers.normalizeHostname('127.0.0.1'), '127.0.0.1');
 });
@@ -148,16 +168,32 @@ test('parseImportPayload lets later duplicate hosts win', () => {
   assert.equal(result.itemsToSet['example.com_enabled'], true);
 });
 
-test('parseImportPayload handles __proto__ without prototype pollution', () => {
-  const result = helpers.parseImportPayload({
+test('parseImportPayload rejects reserved hosts without prototype pollution', () => {
+  assert.throws(() => helpers.parseImportPayload({
     type: meta.fileType,
     schemaVersion: meta.schemaVersion,
     entries: [{ host: '__proto__', css: 'body{}' }]
-  }, meta);
+  }, meta), /Invalid host at entry 1/);
 
-  assert.equal(Object.getPrototypeOf(result.itemsToSet), null);
-  assert.equal(result.itemsToSet.__proto__, 'body{}');
   assert.equal(Object.prototype.css, undefined);
+});
+
+test('a valid export larger than one MiB round-trips below local quota', () => {
+  const css = `/* large */${'x'.repeat((1024 * 1024) + 4096)}`;
+  const exported = helpers.buildExportPayload([
+    { host: 'large.example', css, enabled: true }
+  ], meta);
+  const serialized = JSON.stringify(exported);
+  const fileLimit = helpers.getImportFileSizeLimit(10 * 1024 * 1024, 1024 * 1024);
+
+  assert.ok(Buffer.byteLength(serialized) > 1024 * 1024);
+  assert.ok(Buffer.byteLength(serialized) < fileLimit);
+  const imported = helpers.parseImportPayload(JSON.parse(serialized), meta);
+  assert.equal(imported.itemsToSet['large.example'], css);
+  assert.doesNotThrow(() => helpers.assertStorageLimits(imported.itemsToSet, {
+    quotaBytes: 10 * 1024 * 1024,
+    maxItems: Infinity
+  }));
 });
 
 test('assertStorageLimits allows items under limits', () => {
@@ -244,6 +280,18 @@ test('buildKeysToRemove removes existing hosts absent from import', () => {
   assert.deepEqual(keys, ['remove.test', 'remove.test_enabled']);
 });
 
+test('buildKeysToRemove sweeps orphaned enabled keys and noncanonical duplicates', () => {
+  const keys = helpers.buildKeysToRemove({
+    'keep.test': 'canonical',
+    'keep.test_enabled': true,
+    'KEEP.test': 'duplicate',
+    'KEEP.test_enabled': false,
+    'orphan.test_enabled': false
+  }, new Set(['keep.test']));
+
+  assert.deepEqual(keys, ['KEEP.test', 'KEEP.test_enabled', 'orphan.test_enabled']);
+});
+
 test('extractManagedHostItems returns only managed host storage keys', () => {
   const items = helpers.extractManagedHostItems({
     '__internal': 'x',
@@ -259,6 +307,37 @@ test('extractManagedHostItems returns only managed host storage keys', () => {
   });
 });
 
+test('extractManagedHostItems preserves exact orphan and missing-enabled state', () => {
+  const items = helpers.extractManagedHostItems({
+    'plain.test': 'css',
+    'orphan.test_enabled': false
+  });
+
+  assert.deepEqual(Object.fromEntries(Object.entries(items)), {
+    'plain.test': 'css',
+    'orphan.test_enabled': false
+  });
+});
+
+test('buildPostImportStorage preserves internal data and replaces all managed keys', () => {
+  const result = helpers.buildPostImportStorage({
+    '__marker': true,
+    'old.test': 'old',
+    'old.test_enabled': false,
+    'orphan.test_enabled': true
+  }, {
+    'new.test': 'new',
+    'new.test_enabled': true
+  });
+
+  assert.equal(Object.getPrototypeOf(result), null);
+  assert.deepEqual(Object.fromEntries(Object.entries(result)), {
+    '__marker': true,
+    'new.test': 'new',
+    'new.test_enabled': true
+  });
+});
+
 test('canWriteImportBeforeCleanup returns true when transient items fit', () => {
   assert.equal(helpers.canWriteImportBeforeCleanup({ a: 'b' }, { c: 'd' }, {
     maxItems: 4,
@@ -271,4 +350,63 @@ test('canWriteImportBeforeCleanup returns false when transient items exceed limi
     maxItems: 1,
     quotaBytes: 100
   }), false);
+});
+
+test('canWriteImportBeforeCleanup uses a null-prototype merge', () => {
+  const current = JSON.parse('{"__proto__":{"polluted":true}}');
+  assert.equal(helpers.canWriteImportBeforeCleanup(current, { safe: 'value' }, {
+    maxItems: 5,
+    quotaBytes: 1000
+  }), true);
+  assert.equal(Object.prototype.polluted, undefined);
+});
+
+test('getImportFileSizeLimit derives bounded overhead from quota', () => {
+  assert.equal(
+    helpers.getImportFileSizeLimit(10 * 1024 * 1024, 1024 * 1024),
+    164 * 1024 * 1024
+  );
+  assert.equal(
+    helpers.getImportFileSizeLimit(20 * 1024 * 1024, 1024 * 1024),
+    192 * 1024 * 1024
+  );
+  assert.equal(
+    helpers.getImportFileSizeLimit(10 * 1024 * 1024, 256 * 1024 * 1024),
+    192 * 1024 * 1024
+  );
+  assert.equal(helpers.getImportFileSizeLimit(Infinity, 2 * 1024 * 1024), 2 * 1024 * 1024);
+});
+
+test('getImportFileSizeLimit covers exports dominated by many small hosts', () => {
+  const entries = [];
+  const storedItems = Object.create(null);
+  for (let index = 0; index < 150000; index += 1) {
+    const host = `h${index.toString(36)}.x`;
+    entries.push({ host, css: '', enabled: true });
+    storedItems[host] = '';
+  }
+
+  const storageBytes = helpers.estimateStorageUsage(storedItems).totalBytes;
+  const exportBytes = Buffer.byteLength(JSON.stringify(
+    helpers.buildExportPayload(entries, meta),
+    null,
+    2
+  ));
+  assert.ok(exportBytes > storageBytes * 5);
+  assert.ok(exportBytes < helpers.getImportFileSizeLimit(storageBytes));
+});
+
+test('getImportFailureMessage distinguishes successful and failed rollback', () => {
+  assert.equal(
+    helpers.getImportFailureMessage('Import failed.', false, false),
+    'Import failed.'
+  );
+  assert.equal(
+    helpers.getImportFailureMessage('Import failed.', true, true),
+    'Import failed. Previous state was restored.'
+  );
+  assert.match(
+    helpers.getImportFailureMessage('Import failed.', true, false),
+    /rollback did not complete/
+  );
 });

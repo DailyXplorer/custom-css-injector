@@ -1,0 +1,19 @@
+{
+  "name": "custom-css-injector",
+  "private": true,
+  "description": "Development tooling for the unbundled Custom CSS Injector Chrome extension.",
+  "scripts": {
+    "test": "npm run test:unit",
+    "test:unit": "node --test tests/",
+    "test:e2e": "node --test e2e/extension.test.js",
+    "check:syntax": "node --check background.js && node --check content-script.js && node --check shadow-dom-bridge.js && node --check utils.js && node --check constants.js && node --check popup-main.js && node --check popup-persistence.js && node --check popup-storage-helpers.js && node --check e2e/extension.test.js",
+    "release:check": "bash scripts/release.sh check",
+    "release:build": "bash scripts/release.sh build"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "playwright": "1.61.1"
+  }
+}

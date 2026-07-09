@@ -14,7 +14,43 @@
       <h1>Release notes</h1>
     </header>
 
-    <article class="release-version" id="v2-1-4">
+    <article class="release-version" id="v2-2-0">
+      <header class="release-version-header">
+        <h2 class="release-version-title">2.2.0 update</h2>
+        <p class="release-date"><time datetime="2026-07-09">9 July 2026</time></p>
+      </header>
+
+      <section class="release-section">
+        <h3>Deeper site coverage</h3>
+        <ul>
+          <li>CSS now reaches open and closed declarative Shadow DOM, including nested components created before the extension becomes active.</li>
+          <li>Dynamic components, hidden frames, <code>srcdoc</code> frames, and cross-origin frames consistently use the top page's hostname and CSS.</li>
+          <li>One shared stylesheet is parsed per frame and adopted without adding elements to cards or components; <code>@import</code> remains supported through a compatibility path.</li>
+          <li>Managed styles repair themselves after a site removes, edits, disables, or reorders them, and after a page replaces its document.</li>
+        </ul>
+      </section>
+
+      <section class="release-section">
+        <h3>Reliability and safety</h3>
+        <ul>
+          <li>Popup saves are revisioned and serialized so the latest edit cannot be overtaken by an older delayed write.</li>
+          <li>Reset, toggle, tab switching, and popup-close paths preserve the correct host and recover cleanly from storage failures.</li>
+          <li>Large configuration exports can be imported again, while near-quota imports refuse safely instead of deleting the previous configuration first.</li>
+        </ul>
+      </section>
+
+      <section class="release-section">
+        <h3>Quality</h3>
+        <ul>
+          <li>Automated Chromium scenarios now cover strict CSP pages, frames, Shadow DOM, live messages, and document replacement.</li>
+          <li>The release gate validates runtime syntax, unit tests, package contents, and every local asset reference without adding permissions.</li>
+        </ul>
+      </section>
+    </article>
+
+    <div class="release-divider" role="presentation"></div>
+
+    <article class="release-version release-version--past" id="v2-1-4">
       <header class="release-version-header">
         <h2 class="release-version-title">2.1.4 update</h2>
         <p class="release-date"><time datetime="2026-06-12">12 June 2026</time></p>
