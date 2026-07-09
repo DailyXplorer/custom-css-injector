@@ -676,11 +676,13 @@ test('coalesces a deeply nested connected batch without rescanning every ancesto
     await page.evaluate(() => {
       window.__nestedBulkClosedRoots = [];
       let parent = document.body;
-      for (let index = 0; index < 2000; index += 1) {
+      // Alternating wrapper/spacer nodes exercise ancestor reduction while
+      // staying below Chromium's renderer depth ceiling.
+      for (let index = 0; index < 192; index += 1) {
         const element = document.createElement('div');
         const detachedSpacer = document.createElement('span');
         element.appendChild(detachedSpacer);
-        if (index === 0 || index === 999 || index === 1999) {
+        if (index === 0 || index === 95 || index === 191) {
           const root = element.attachShadow({ mode: 'closed' });
           root.innerHTML = `<span id="nested-bulk-target-${index}">nested bulk</span>`;
           window.__nestedBulkClosedRoots.push(root);
@@ -730,9 +732,13 @@ test('reorders a later site-adopted sheet so extension CSS keeps equal-specifici
     const order = await page.evaluate(() => ({
       documentSiteIndex: document.adoptedStyleSheets.indexOf(window.__siteAdoptedSheet),
       documentExtensionIndex: document.adoptedStyleSheets.length - 1,
+      documentSheetCount: document.adoptedStyleSheets.length,
       shadowSiteIndex: window.__adoptedRoot.adoptedStyleSheets.indexOf(window.__siteAdoptedSheet),
-      shadowExtensionIndex: window.__adoptedRoot.adoptedStyleSheets.length - 1
+      shadowExtensionIndex: window.__adoptedRoot.adoptedStyleSheets.length - 1,
+      shadowSheetCount: window.__adoptedRoot.adoptedStyleSheets.length
     }));
+    assert.equal(order.documentSheetCount, 2);
+    assert.equal(order.shadowSheetCount, 2);
     assert.ok(order.documentSiteIndex >= 0);
     assert.ok(order.shadowSiteIndex >= 0);
     assert.ok(order.documentSiteIndex < order.documentExtensionIndex);
@@ -1285,17 +1291,7 @@ test('sweeps orphan managed sheets on reinjection and clear removes the replacem
 
     const extensionId = new URL(extensionWorker.url()).host;
     const markerProperty = `--__css-injector-${extensionId}-managed-sheet-v2`;
-    await page.evaluate(({ marker, host }) => {
-      const orphanSheet = new CSSStyleSheet();
-      orphanSheet.replaceSync(`
-        @media not all { :root { ${marker}: 1; } }
-        #document-last, #shadow-last { color: rgb(90, 80, 70) !important; }
-      `);
-      document.adoptedStyleSheets = [...document.adoptedStyleSheets, orphanSheet];
-      window.__structuralRoot.adoptedStyleSheets = [
-        ...window.__structuralRoot.adoptedStyleSheets,
-        orphanSheet
-      ];
+    await page.evaluate((host) => {
       const legacyDocumentStyle = document.createElement('style');
       legacyDocumentStyle.id = 'legacy-document-style';
       legacyDocumentStyle.setAttribute('data-css-injector', host);
@@ -1310,9 +1306,19 @@ test('sweeps orphan managed sheets on reinjection and clear removes the replacem
       legacyShadowStyle.setAttribute('data-css-injector-shadow-bridge', 'true');
       legacyShadowStyle.textContent = '.legacy-shadow-marker { --legacy: shadow; }';
       window.__structuralRoot.appendChild(legacyShadowStyle);
-    }, { marker: markerProperty, host: MANAGED_HOST });
+    }, MANAGED_HOST);
 
     const countManagedSheets = await page.evaluate((marker) => {
+      const orphanSheet = new CSSStyleSheet();
+      orphanSheet.replaceSync(`
+        @media not all { :root { ${marker}: 1; } }
+        #document-last, #shadow-last { color: rgb(90, 80, 70) !important; }
+      `);
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, orphanSheet];
+      window.__structuralRoot.adoptedStyleSheets = [
+        ...window.__structuralRoot.adoptedStyleSheets,
+        orphanSheet
+      ];
       const count = (scope) => scope.adoptedStyleSheets.filter((sheet) => (
         Array.from(sheet.cssRules).some((rule) => rule.cssText.includes(marker))
       )).length;
@@ -1357,11 +1363,13 @@ test('sweeps orphan managed sheets on reinjection and clear removes the replacem
 
     await page.evaluate(() => {
       let parent = document.body;
-      for (let index = 0; index < 1500; index += 1) {
+      // Two DOM nodes are added per level, so remain below Chromium's
+      // renderer depth ceiling while exercising the legacy observer path.
+      for (let index = 0; index < 192; index += 1) {
         const wrapper = document.createElement('div');
         const detachedSpacer = document.createElement('span');
         wrapper.appendChild(detachedSpacer);
-        if (index === 1499) {
+        if (index === 191) {
           window.__legacyObserverDeepRoot = wrapper.attachShadow({ mode: 'closed' });
           window.__legacyObserverDeepRoot.innerHTML =
             '<span id="legacy-observer-deep-target">legacy observer deep</span>';
