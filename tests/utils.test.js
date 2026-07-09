@@ -59,6 +59,24 @@ test('countLines treats non-string input as one line', () => {
   assert.equal(utils.countLines(undefined), 1);
 });
 
+test('hasTopLevelCssImport detects ordinary and escaped import at-rules', () => {
+  assert.equal(utils.hasTopLevelCssImport('@import url("theme.css"); body {}'), true);
+  assert.equal(utils.hasTopLevelCssImport('@\\69mport "theme.css";'), true);
+  assert.equal(utils.hasTopLevelCssImport('@\\000069 mport url(theme.css);'), true);
+});
+
+test('hasTopLevelCssImport ignores import text in comments and strings', () => {
+  assert.equal(utils.hasTopLevelCssImport('/* @import url("old.css"); */ body {}'), false);
+  assert.equal(utils.hasTopLevelCssImport('.x::before { content: "@import"; }'), false);
+  assert.equal(utils.hasTopLevelCssImport(".x::after { content: '@\\69mport'; }"), false);
+});
+
+test('hasTopLevelCssImport ignores nested import-like tokens', () => {
+  assert.equal(utils.hasTopLevelCssImport('.x { --rule: @import; }'), false);
+  assert.equal(utils.hasTopLevelCssImport('@supports selector(:is(@import)) { .x {} }'), false);
+  assert.equal(utils.hasTopLevelCssImport(null), false);
+});
+
 test('createHostState preserves string CSS and enabled true', () => {
   assert.deepEqual(utils.createHostState('example.com', 'body{}', true), {
     host: 'example.com',

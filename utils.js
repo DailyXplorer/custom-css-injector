@@ -170,6 +170,159 @@
     return lineCount;
   }
 
+  function isCssNameCode(code) {
+    return code >= 128 ||
+      (code >= 48 && code <= 57) ||
+      (code >= 65 && code <= 90) ||
+      (code >= 97 && code <= 122) ||
+      code === 45 ||
+      code === 95;
+  }
+
+  function consumeCssIdentifierEscape(text, startIndex) {
+    let index = startIndex + 1;
+    if (index >= text.length) return { valid: false, value: '', nextIndex: index };
+
+    const firstCode = text.charCodeAt(index);
+    if (firstCode === 10 || firstCode === 12 || firstCode === 13) {
+      return { valid: false, value: '', nextIndex: index + 1 };
+    }
+
+    let hexadecimal = '';
+    while (index < text.length && hexadecimal.length < 6) {
+      const code = text.charCodeAt(index);
+      const isHexadecimal =
+        (code >= 48 && code <= 57) ||
+        (code >= 65 && code <= 70) ||
+        (code >= 97 && code <= 102);
+      if (!isHexadecimal) break;
+      hexadecimal += text[index];
+      index += 1;
+    }
+
+    if (hexadecimal) {
+      if (index < text.length) {
+        const whitespaceCode = text.charCodeAt(index);
+        if (whitespaceCode === 13 && text.charCodeAt(index + 1) === 10) {
+          index += 2;
+        } else if (whitespaceCode === 9 || whitespaceCode === 10 ||
+            whitespaceCode === 12 || whitespaceCode === 13 || whitespaceCode === 32) {
+          index += 1;
+        }
+      }
+      const codePoint = Number.parseInt(hexadecimal, 16);
+      const normalizedCodePoint = codePoint === 0 || codePoint > 0x10FFFF
+        ? 0xFFFD
+        : codePoint;
+      return {
+        valid: true,
+        value: String.fromCodePoint(normalizedCodePoint),
+        nextIndex: index
+      };
+    }
+
+    return { valid: true, value: text[index], nextIndex: index + 1 };
+  }
+
+  function hasTopLevelCssImport(value) {
+    if (typeof value !== 'string' || !value) return false;
+
+    let braceDepth = 0;
+    let parenthesisDepth = 0;
+    let bracketDepth = 0;
+
+    for (let index = 0; index < value.length; index += 1) {
+      const character = value[index];
+      const nextCharacter = value[index + 1];
+
+      if (character === '/' && nextCharacter === '*') {
+        const commentEnd = value.indexOf('*/', index + 2);
+        if (commentEnd === -1) return false;
+        index = commentEnd + 1;
+        continue;
+      }
+
+      if (character === '"' || character === "'") {
+        const quote = character;
+        for (index += 1; index < value.length; index += 1) {
+          if (value[index] === '\\') {
+            if (value[index + 1] === '\r' && value[index + 2] === '\n') {
+              index += 2;
+            } else {
+              index += 1;
+            }
+            continue;
+          }
+          if (value[index] === quote) break;
+        }
+        continue;
+      }
+
+      if (character === '\\') {
+        if (nextCharacter === '\r' && value[index + 2] === '\n') {
+          index += 2;
+        } else {
+          index += 1;
+        }
+        continue;
+      }
+
+      if (character === '{') {
+        braceDepth += 1;
+        continue;
+      }
+      if (character === '}') {
+        braceDepth = Math.max(0, braceDepth - 1);
+        continue;
+      }
+      if (character === '(') {
+        parenthesisDepth += 1;
+        continue;
+      }
+      if (character === ')') {
+        parenthesisDepth = Math.max(0, parenthesisDepth - 1);
+        continue;
+      }
+      if (character === '[') {
+        bracketDepth += 1;
+        continue;
+      }
+      if (character === ']') {
+        bracketDepth = Math.max(0, bracketDepth - 1);
+        continue;
+      }
+
+      if (character !== '@' || braceDepth !== 0 ||
+          parenthesisDepth !== 0 || bracketDepth !== 0) {
+        continue;
+      }
+
+      let identifier = '';
+      let cursor = index + 1;
+      while (cursor < value.length) {
+        const code = value.charCodeAt(cursor);
+        if (isCssNameCode(code)) {
+          identifier += value[cursor];
+          cursor += 1;
+          continue;
+        }
+        if (value[cursor] === '\\') {
+          const escape = consumeCssIdentifierEscape(value, cursor);
+          if (!escape.valid) break;
+          identifier += escape.value;
+          cursor = escape.nextIndex;
+          continue;
+        }
+        break;
+      }
+
+      if (identifier.toLowerCase() === 'import') return true;
+      index = Math.max(index, cursor - 1);
+    }
+
+    return false;
+  }
+
   const exposedUtils = {
     getCurrentHostname: function () {
       try {
@@ -287,6 +440,10 @@
 
     countLines: function (value) {
       return countLines(value);
+    },
+
+    hasTopLevelCssImport: function (value) {
+      return hasTopLevelCssImport(value);
     },
 
     getErrorMessage: function (error, fallbackMessage) {

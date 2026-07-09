@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Custom CSS Injector – custom styles per domain",
-  "version": "2.1.4",
+  "version": "2.2.0",
   "description": "Inject custom CSS per domain. A minimalist, ultra-efficient extension to style any website without bloat or heavy features.",
   "minimum_chrome_version": "111",
   "permissions": ["storage", "scripting", "activeTab"],

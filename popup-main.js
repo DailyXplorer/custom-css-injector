@@ -1,5 +1,25 @@
 const cssInjectorUtils = typeof CSSInjectorUtils !== 'undefined' ? CSSInjectorUtils : null;
 const STORAGE_AREA = 'local';
+const MAX_RENDERED_LINE_NUMBERS = 20000;
+
+function createLineNumberGutterState(lineCount, maxRenderedLines = MAX_RENDERED_LINE_NUMBERS) {
+  const normalizedLineCount = Number.isFinite(lineCount)
+    ? Math.max(1, Math.floor(lineCount))
+    : 1;
+  const normalizedLimit = Number.isFinite(maxRenderedLines) && maxRenderedLines > 0
+    ? Math.floor(maxRenderedLines)
+    : MAX_RENDERED_LINE_NUMBERS;
+
+  if (normalizedLineCount > normalizedLimit) {
+    return { text: '', suppressed: true };
+  }
+
+  const parts = new Array(normalizedLineCount);
+  for (let index = 0; index < normalizedLineCount; index += 1) {
+    parts[index] = String(index + 1);
+  }
+  return { text: parts.join('\n'), suppressed: false };
+}
 
 async function getActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -70,7 +90,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   let currentCss = '';
   let loadRequestId = 0;
   let uiMutationLocked = false;
+  let uiMutationEpoch = 0;
   let activeContextRefreshTimer = null;
+  let activeContextRefreshPending = false;
   let lastLineCount = 0;
   let lineNumberUpdateTimer = null;
   let pendingForceLineNumberRebuild = false;
@@ -84,7 +106,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     SCHEMA_VERSION: 1,
     TOAST_DURATION_MS: 3500,
     BUTTON_FEEDBACK_MS: 1000,
-    MAX_IMPORT_FILE_BYTES: typeof saveConstants.MAX_IMPORT_FILE_BYTES === 'number' ? saveConstants.MAX_IMPORT_FILE_BYTES : (1024 * 1024),
+    MAX_IMPORT_FILE_BYTES: typeof saveConstants.MIN_IMPORT_FILE_BYTES === 'number' ? saveConstants.MIN_IMPORT_FILE_BYTES : (1024 * 1024),
     WRITE_CHUNK_SIZE: 80,
     REMOVE_CHUNK_SIZE: 150
   };
@@ -92,39 +114,41 @@ document.addEventListener('DOMContentLoaded', async () => {
   const storageHelpers = typeof CSSInjectorPopupStorageHelpers !== 'undefined'
     ? CSSInjectorPopupStorageHelpers
     : null;
+  const persistenceHelpers = typeof CSSInjectorPopupPersistence !== 'undefined'
+    ? CSSInjectorPopupPersistence
+    : null;
 
-  if (!storageHelpers || !cssInjectorUtils) {
-    console.error('[CSS Injector] Missing popup dependencies (utils.js / popup-storage-helpers.js).');
+  if (!storageHelpers || !persistenceHelpers || !cssInjectorUtils) {
+    console.error('[CSS Injector] Missing popup dependencies.');
     return;
   }
+  configTransfer.MAX_IMPORT_FILE_BYTES = storageHelpers.getImportFileSizeLimit(
+    LOCAL_QUOTA_BYTES,
+    configTransfer.MAX_IMPORT_FILE_BYTES
+  );
 
   let configToastTimer = null;
   let configTransferInProgress = false;
   const SHADOW_BRIDGE_SCRIPT_FILES = ['shadow-dom-bridge.js'];
   const CONTENT_SCRIPT_FILES = ['utils.js', 'constants.js', 'content-script.js'];
   const CONTENT_SCRIPT_RUNTIME_KEY = '__CSSInjectorContentScriptRuntime';
+  const CONTENT_SCRIPT_RUNTIME_VERSION = 2;
+  const SHADOW_BRIDGE_RUNTIME_KEY = '__CSSInjectorShadowBridgeRuntime';
+  const SHADOW_BRIDGE_RUNTIME_VERSION = 2;
   const contentScriptInjectionTasks = new Map();
 
   const lastPersistedByHost = Object.create(null);
 
-  let persistTimer = null;
   let applyTimer = null;
-  let pendingPayload = null;
-  let persistPromise = null;
-  let persistQueue = Promise.resolve();
-  let queuedPersistWriteCount = 0;
 
   function countEditorLines(value) {
     return cssInjectorUtils.countLines(value);
   }
 
   function setLineNumbersText(lineCount) {
-    const n = Math.max(1, lineCount | 0);
-    const parts = new Array(n);
-    for (let i = 0; i < n; i += 1) {
-      parts[i] = String(i + 1);
-    }
-    lineNumbers.textContent = parts.join('\n');
+    const gutterState = createLineNumberGutterState(lineCount);
+    lineNumbers.textContent = gutterState.text;
+    lineNumbers.classList.toggle('is-suppressed', gutterState.suppressed);
   }
 
   function updateLineNumbers(forceFullRebuild = false) {
@@ -297,9 +321,28 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
+  function markActiveContextRefreshPending() {
+    activeContextRefreshPending = true;
+    if (!uiMutationLocked && !configTransferInProgress) {
+      scheduleActiveContextRefresh();
+    }
+  }
+
   function setUiMutationLocked(isLocked) {
-    uiMutationLocked = isLocked === true;
+    const nextLocked = isLocked === true;
+    if (uiMutationLocked !== nextLocked) {
+      uiMutationLocked = nextLocked;
+      uiMutationEpoch += 1;
+    }
+    if (uiMutationLocked && activeContextRefreshTimer !== null) {
+      clearTimeout(activeContextRefreshTimer);
+      activeContextRefreshTimer = null;
+      markActiveContextRefreshPending();
+    }
     applyUiMutationState();
+    if (!uiMutationLocked && activeContextRefreshPending) {
+      markActiveContextRefreshPending();
+    }
   }
 
   function applyUiConstants() {
@@ -419,8 +462,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
   }
 
-  async function probeContentScriptRuntime(tabContext) {
+  function isUiMutationContextCurrent(mutation) {
+    return mutation &&
+      mutation.host === currentHost &&
+      mutation.loadRequestId === loadRequestId &&
+      mutation.tabContext.id === currentTabId &&
+      mutation.tabContext.url === currentTabUrl;
+  }
+
+  async function probeContentScriptRuntime(tabContext, options = {}) {
     const targetContext = tabContext || getCurrentTabContext();
+    const probeAllFrames = options.allFrames !== false;
     if (!targetContext || typeof targetContext.id !== 'number' || !targetContext.scriptable) {
       return { ready: false, url: null, allFramesReady: false };
     }
@@ -430,28 +482,58 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     try {
-      const probeResults = await chrome.scripting.executeScript({
-        target: { tabId: targetContext.id, allFrames: true },
-        func: (runtimeKey) => {
-          const runtime = globalThis[runtimeKey];
-          return {
-            ready: !!runtime && runtime.initialized === true,
-            url: window.location.href
-          };
-        },
-        args: [CONTENT_SCRIPT_RUNTIME_KEY]
-      });
+      const probeRuntime = (runtimeKey, runtimeVersion, requireBridgeWrapper) => {
+        const runtime = globalThis[runtimeKey];
+        const attachShadow = globalThis.Element && globalThis.Element.prototype
+          ? globalThis.Element.prototype.attachShadow
+          : null;
+        return {
+          ready: !!runtime &&
+            runtime.initialized === true &&
+            runtime.version === runtimeVersion &&
+            (!requireBridgeWrapper || (
+              attachShadow &&
+              attachShadow.__cssInjectorShadowBridgeWrapped === true &&
+              attachShadow.__cssInjectorShadowBridgeVersion === runtimeVersion
+            )),
+          url: window.location.href
+        };
+      };
+      const probeTarget = probeAllFrames
+        ? { tabId: targetContext.id, allFrames: true }
+        : { tabId: targetContext.id };
+      const [contentProbeResults, bridgeProbeResults] = await Promise.all([
+        chrome.scripting.executeScript({
+          target: probeTarget,
+          func: probeRuntime,
+          args: [CONTENT_SCRIPT_RUNTIME_KEY, CONTENT_SCRIPT_RUNTIME_VERSION, false]
+        }),
+        chrome.scripting.executeScript({
+          target: probeTarget,
+          world: 'MAIN',
+          func: probeRuntime,
+          args: [SHADOW_BRIDGE_RUNTIME_KEY, SHADOW_BRIDGE_RUNTIME_VERSION, true]
+        })
+      ]);
 
-      const normalizedResults = Array.isArray(probeResults) ? probeResults : [];
-      const topFrameResult = normalizedResults.find((result) => result && result.frameId === 0) || normalizedResults[0];
-      const allFramesReady = normalizedResults.length > 0 && normalizedResults.every((result) => (
+      const contentResults = Array.isArray(contentProbeResults) ? contentProbeResults : [];
+      const bridgeResults = Array.isArray(bridgeProbeResults) ? bridgeProbeResults : [];
+      const topContentResult = contentResults.find((result) => result && result.frameId === 0) || contentResults[0];
+      const topBridgeResult = bridgeResults.find((result) => result && result.frameId === 0) || bridgeResults[0];
+      const contentFramesReady = contentResults.length > 0 && contentResults.every((result) => (
+        result && result.result && result.result.ready === true
+      ));
+      const bridgeFramesReady = bridgeResults.length > 0 && bridgeResults.every((result) => (
         result && result.result && result.result.ready === true
       ));
 
       return {
-        ready: !!(topFrameResult && topFrameResult.result && topFrameResult.result.ready === true),
-        allFramesReady,
-        url: topFrameResult && topFrameResult.result ? topFrameResult.result.url : null
+        ready: !!(
+          topContentResult && topContentResult.result && topContentResult.result.ready === true &&
+          topBridgeResult && topBridgeResult.result && topBridgeResult.result.ready === true
+        ),
+        allFramesReady: contentFramesReady && bridgeFramesReady,
+        url: topContentResult && topContentResult.result ? topContentResult.result.url : null
       };
     } catch {
       return { ready: false, url: null, allFramesReady: false };
@@ -529,7 +611,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             files: CONTENT_SCRIPT_FILES
           });
         }
-        return true;
+        const postInjectionProbe = await probeContentScriptRuntime(targetContext, { allFrames: false });
+        return postInjectionProbe.ready === true && postInjectionProbe.url === targetContext.url;
       } catch (error) {
         errorHandler.logError('ensureActiveTabContentScript', error);
         return false;
@@ -612,20 +695,36 @@ document.addEventListener('DOMContentLoaded', async () => {
     return cssInjectorUtils.storageRemove(STORAGE_AREA, keys, STORAGE_TIMEOUT_MS);
   }
 
-  function hasPendingPersistence() {
-    return pendingPayload !== null || persistTimer !== null;
+  const persistenceController = persistenceHelpers.createPersistenceController({
+    delayMs: PERSIST_DELAY_MS,
+    async write(payload) {
+      const state = createHostState(payload.host, payload.css, payload.enabled);
+      await storageSet(getHostStateItems(state));
+      lastPersistedByHost[payload.host] = {
+        css: state.css,
+        enabled: state.enabled
+      };
+    },
+    onError(error) {
+      errorHandler.logError('persistence', error);
+      showConfigToast(getErrorMessage(error), 'error');
+    }
+  });
+
+  function hasPendingPersistence(host = null) {
+    return persistenceController.hasPending(host);
   }
 
-  function cancelScheduledPersistence() {
-    if (persistTimer !== null) {
-      clearTimeout(persistTimer);
-      persistTimer = null;
-    }
+  function cancelScheduledPersistence(host = currentHost) {
     if (applyTimer !== null) {
       clearTimeout(applyTimer);
       applyTimer = null;
     }
-    pendingPayload = null;
+    if (host) {
+      persistenceController.invalidateHost(host);
+    } else {
+      persistenceController.invalidateAll();
+    }
   }
 
   function scheduleApplyToTab(host, css, enabled) {
@@ -648,120 +747,63 @@ document.addEventListener('DOMContentLoaded', async () => {
     }, LIVE_APPLY_DELAY_MS);
   }
 
-  async function writeHostState(host, css, enabled) {
-    const state = createHostState(host, css, enabled);
-    const items = getHostStateItems(state);
-    queuedPersistWriteCount += 1;
-
-    const writeTask = persistQueue
-      .catch(() => {})
-      .then(async () => {
-        await storageSet(items);
-        lastPersistedByHost[host] = { css: state.css, enabled: state.enabled };
-      })
-      .finally(() => {
-        queuedPersistWriteCount = Math.max(0, queuedPersistWriteCount - 1);
-      });
-
-    persistQueue = writeTask.catch(() => {});
-    await writeTask;
-  }
-
   async function waitForPersistQueue() {
-    await persistQueue.catch(() => {});
+    await persistenceController.waitForIdle();
   }
 
   function schedulePersistence(host, css, enabled) {
-    pendingPayload = { host, css, enabled };
-
-    if (persistTimer !== null) {
-      clearTimeout(persistTimer);
-      persistTimer = null;
-    }
-
-    persistTimer = setTimeout(() => {
-      persistTimer = null;
-      const payload = pendingPayload;
-      if (!payload) return;
-
-      persistPromise = (async () => {
-        try {
-          await writeHostState(payload.host, payload.css, payload.enabled);
-          if (pendingPayload &&
-              pendingPayload.host === payload.host &&
-              pendingPayload.css === payload.css &&
-              pendingPayload.enabled === payload.enabled) {
-            pendingPayload = null;
-          }
-        } catch (error) {
-          errorHandler.logError('schedulePersistence', error);
-          showConfigToast(getErrorMessage(error), 'error');
-        } finally {
-          persistPromise = null;
-        }
-      })();
-    }, PERSIST_DELAY_MS);
-
+    persistenceController.schedule({ host, css, enabled });
     scheduleApplyToTab(host, css, enabled);
   }
 
   async function flushPersistence() {
-    if (persistTimer !== null) {
-      clearTimeout(persistTimer);
-      persistTimer = null;
-    }
     if (applyTimer !== null) {
       clearTimeout(applyTimer);
       applyTimer = null;
     }
 
-    const payload = pendingPayload;
-    pendingPayload = null;
+    const host = currentHost;
+    const tabContext = getCurrentTabContext();
+    const payloadBeforeFlush = host
+      ? persistenceController.getPendingPayload(host)
+      : null;
+    const succeeded = await persistenceController.flush();
+    if (!succeeded) return false;
 
-    if (persistPromise) {
-      await persistPromise.catch(() => {});
+    if (payloadBeforeFlush &&
+        host === currentHost &&
+        tabContext.id === currentTabId &&
+        tabContext.url === currentTabUrl &&
+        tabContext.scriptable) {
+      const persisted = lastPersistedByHost[host] || payloadBeforeFlush;
+      await notifyActiveTab({
+        type: 'css:apply',
+        host,
+        css: persisted.css,
+        enabled: persisted.enabled
+      }, { tabContext });
     }
-
-    await waitForPersistQueue();
-
-    if (!payload || !payload.host) {
-      return true;
-    }
-
-    try {
-      await writeHostState(payload.host, payload.css, payload.enabled);
-      const ctx = getCurrentTabContext();
-      if (ctx.host === payload.host && ctx.scriptable) {
-        await notifyActiveTab({
-          type: 'css:apply',
-          host: payload.host,
-          css: payload.css,
-          enabled: payload.enabled
-        });
-      }
-      return true;
-    } catch (error) {
-      if (pendingPayload === null) {
-        pendingPayload = payload;
-      }
-      errorHandler.logError('flushPersistence', error);
-      showConfigToast(getErrorMessage(error), 'error');
-      return false;
-    }
+    return true;
   }
 
   function persistPendingStateImmediately() {
-    if (!pendingPayload || !pendingPayload.host) return;
-    const payload = pendingPayload;
+    const payloads = persistenceController.getPendingForImmediateDispatch();
+    if (!payloads.length) return;
+
     try {
       if (typeof chrome !== 'undefined' &&
           chrome.storage &&
           chrome.storage.local &&
           typeof chrome.storage.local.set === 'function') {
-        chrome.storage.local.set({
-          [payload.host]: typeof payload.css === 'string' ? payload.css : '',
-          [`${payload.host}_enabled`]: payload.enabled !== false
-        });
+        const items = Object.create(null);
+        for (const payload of payloads) {
+          items[payload.host] = payload.css;
+          items[`${payload.host}_enabled`] = payload.enabled;
+        }
+        const writeResult = chrome.storage.local.set(items);
+        if (writeResult && typeof writeResult.catch === 'function') {
+          writeResult.catch((error) => errorHandler.logError('persistPendingStateImmediately', error));
+        }
       }
     } catch (error) {
       errorHandler.logError('persistPendingStateImmediately', error);
@@ -770,21 +812,36 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   async function refreshCurrentHostState(options = {}) {
     const host = typeof options.host === 'string' && options.host ? options.host : currentHost;
+    const allowDuringUiMutation = options.allowDuringUiMutation === true;
+    if (uiMutationLocked && !allowDuringUiMutation) {
+      markActiveContextRefreshPending();
+      return null;
+    }
     if (!host || !currentTabScriptable) {
       return null;
     }
 
     const requestId = typeof options.requestId === 'number' ? options.requestId : null;
+    const mutationEpochAtRead = uiMutationEpoch;
 
-    if (hasPendingPersistence() && pendingPayload && pendingPayload.host === host) {
+    if (hasPendingPersistence(host)) {
       return null;
     }
 
+    const revisionAtRead = persistenceController.getRevision(host);
     const items = await storageGet([host, `${host}_enabled`]);
     if (requestId !== null && requestId !== loadRequestId) {
       return null;
     }
     if (host !== currentHost) {
+      return null;
+    }
+    if (!allowDuringUiMutation &&
+        (uiMutationLocked || mutationEpochAtRead !== uiMutationEpoch)) {
+      markActiveContextRefreshPending();
+      return null;
+    }
+    if (revisionAtRead !== persistenceController.getRevision(host) || hasPendingPersistence(host)) {
       return null;
     }
 
@@ -827,24 +884,55 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  async function resolveActiveTabContext() {
+    const context = createTabContext(await getActiveTab());
+    if (!context.url && typeof context.id === 'number') {
+      const fallbackHost = await requestTopFrameHost(context.id);
+      if (fallbackHost) {
+        context.host = fallbackHost;
+        context.scriptable = true;
+      }
+    }
+    return context;
+  }
+
+  function tabContextMatches(actual, expected) {
+    return !!actual && !!expected &&
+      actual.id === expected.id &&
+      actual.url === expected.url &&
+      actual.host === expected.host &&
+      actual.scriptable === true;
+  }
+
   const loadCssForCurrentSite = async (options = {}) => {
-    const { tabContext = null, flushPending = true } = options;
+    const {
+      tabContext = null,
+      flushPending = true,
+      allowDuringUiMutation = false
+    } = options;
+    if (uiMutationLocked && !allowDuringUiMutation) {
+      markActiveContextRefreshPending();
+      return;
+    }
+    const mutationEpochAtStart = uiMutationEpoch;
     const requestId = ++loadRequestId;
+    const loadIsStale = () => {
+      if (requestId !== loadRequestId) return true;
+      if (!allowDuringUiMutation &&
+          (uiMutationLocked || mutationEpochAtStart !== uiMutationEpoch)) {
+        markActiveContextRefreshPending();
+        return true;
+      }
+      return false;
+    };
     try {
       if (flushPending) {
-        await flushPersistence();
+        const flushed = await flushPersistence();
+        if (!flushed) return;
       }
-      const resolvedTabContext = tabContext || createTabContext(await getActiveTab());
-      if (requestId !== loadRequestId) return;
-
-      if (!resolvedTabContext.url && !resolvedTabContext.host && typeof resolvedTabContext.id === 'number') {
-        const fallbackHost = await requestTopFrameHost(resolvedTabContext.id);
-        if (requestId !== loadRequestId) return;
-        if (fallbackHost) {
-          resolvedTabContext.host = fallbackHost;
-          resolvedTabContext.scriptable = true;
-        }
-      }
+      if (loadIsStale()) return;
+      const resolvedTabContext = tabContext || await resolveActiveTabContext();
+      if (loadIsStale()) return;
 
       if (!resolvedTabContext.url && !resolvedTabContext.host) {
         updateUI({
@@ -876,9 +964,15 @@ document.addEventListener('DOMContentLoaded', async () => {
       currentHost = resolvedTabContext.host;
       await refreshCurrentHostState({
         requestId,
-        placeholder: getEditablePlaceholder()
+        placeholder: getEditablePlaceholder(),
+        allowDuringUiMutation
       });
     } catch (error) {
+      if (requestId !== loadRequestId ||
+          (!allowDuringUiMutation && mutationEpochAtStart !== uiMutationEpoch)) {
+        if (requestId === loadRequestId) markActiveContextRefreshPending();
+        return;
+      }
       errorHandler.logError('loadCssForCurrentSite', error);
       updateUI({
         disabled: true,
@@ -887,6 +981,23 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
     }
   };
+
+  function broadcastToSubframes(tabId, message) {
+    if (typeof tabId !== 'number' || !message || !['css:apply', 'css:clear'].includes(message.type)) {
+      return;
+    }
+
+    try {
+      const broadcastResult = chrome.tabs.sendMessage(
+        tabId,
+        Object.assign({}, message, { delivery: 'subframes' })
+      );
+      if (broadcastResult && typeof broadcastResult.catch === 'function') {
+        broadcastResult.catch(() => {});
+      }
+    } catch {
+    }
+  }
 
   async function notifyActiveTab(message, options = {}) {
     const tabContext = options.tabContext || null;
@@ -917,7 +1028,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       }
 
-      const response = await chrome.tabs.sendMessage(targetTabId, message);
+      const response = await chrome.tabs.sendMessage(targetTabId, message, { frameId: 0 });
       if (response && response.ok === false) {
         const responseError = typeof response.error === 'string' ? response.error : 'Message rejected';
         if (responseError === 'Host mismatch') {
@@ -930,6 +1041,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           error: new Error(responseError)
         };
       }
+      broadcastToSubframes(targetTabId, message);
       return { ok: true, response };
     } catch (error) {
       if (error.message?.includes('Could not establish connection') ||
@@ -953,11 +1065,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function scheduleActiveContextRefresh() {
-    if (configTransferInProgress) return;
+    if (configTransferInProgress || uiMutationLocked) {
+      markActiveContextRefreshPending();
+      if (activeContextRefreshTimer !== null) {
+        clearTimeout(activeContextRefreshTimer);
+        activeContextRefreshTimer = null;
+      }
+      return;
+    }
+    activeContextRefreshPending = false;
     clearTimeout(activeContextRefreshTimer);
     activeContextRefreshTimer = setTimeout(() => {
       activeContextRefreshTimer = null;
-      if (configTransferInProgress) return;
+      if (configTransferInProgress || uiMutationLocked) {
+        markActiveContextRefreshPending();
+        return;
+      }
       loadCssForCurrentSite().catch((error) => {
         errorHandler.logError('scheduleActiveContextRefresh', error);
       });
@@ -982,7 +1105,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     configTransferInProgress = true;
     setUiMutationLocked(true);
     try {
-      await flushPersistence();
+      if (!await flushPersistence()) {
+        throw persistenceController.getLastError() || new Error('Pending CSS could not be saved.');
+      }
       const allItems = await storageGet(null);
       const entries = storageHelpers.getHostEntriesFromStorage(allItems);
       const payload = storageHelpers.buildExportPayload(entries, {
@@ -1013,11 +1138,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     configTransferInProgress = true;
     setUiMutationLocked(true);
     let localMutated = false;
+    let rollbackSucceeded = null;
     let backupManagedItems = Object.create(null);
     let attemptedImportItems = Object.create(null);
 
     try {
-      await flushPersistence();
+      if (!await flushPersistence()) {
+        throw persistenceController.getLastError() || new Error('Pending CSS could not be saved.');
+      }
 
       if (file.size > configTransfer.MAX_IMPORT_FILE_BYTES) {
         throw new Error(`Import file too large (max ${Math.floor(configTransfer.MAX_IMPORT_FILE_BYTES / 1024)} KB).`);
@@ -1035,35 +1163,34 @@ document.addEventListener('DOMContentLoaded', async () => {
       const snapshotBeforeImport = await storageGet(null);
       backupManagedItems = storageHelpers.extractManagedHostItems(snapshotBeforeImport);
       const keysToRemove = storageHelpers.buildKeysToRemove(snapshotBeforeImport, importedHosts);
+      const postImportItems = storageHelpers.buildPostImportStorage(snapshotBeforeImport, itemsToSet);
+      storageHelpers.assertStorageLimits(postImportItems, storageLimits);
       const canWriteBeforeCleanup = storageHelpers.canWriteImportBeforeCleanup(
         snapshotBeforeImport,
         itemsToSet,
         storageLimits
       );
+      if (!canWriteBeforeCleanup) {
+        throw new Error(
+          'Import needs temporary free space to remain recoverable. Export a backup, remove some saved sites, then retry.'
+        );
+      }
 
       cancelScheduledPersistence();
 
-      if (canWriteBeforeCleanup) {
-        if (Object.keys(itemsToSet).length) {
-          localMutated = true;
-          await setLocalStorageChunked(itemsToSet);
-        }
-        if (keysToRemove.length) {
-          localMutated = true;
-          await removeLocalStorageKeysChunked(keysToRemove);
-        }
-      } else {
-        if (Object.keys(backupManagedItems).length) {
-          localMutated = true;
-          await removeLocalStorageKeysChunked(Object.keys(backupManagedItems));
-        }
-        if (Object.keys(itemsToSet).length) {
-          localMutated = true;
-          await setLocalStorageChunked(itemsToSet);
-        }
+      if (Object.keys(itemsToSet).length) {
+        localMutated = true;
+        await setLocalStorageChunked(itemsToSet);
+      }
+      if (keysToRemove.length) {
+        localMutated = true;
+        await removeLocalStorageKeysChunked(keysToRemove);
       }
 
-      await loadCssForCurrentSite({ flushPending: false });
+      await loadCssForCurrentSite({
+        flushPending: false,
+        allowDuringUiMutation: true
+      });
 
       flashButtonSuccess(importBtn, importIcon, 'assets/icons/upload.svg');
       showConfigToast(`Import completed (${importedHosts.size} site${importedHosts.size === 1 ? '' : 's'}).`, 'success');
@@ -1072,16 +1199,19 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (localMutated) {
         try {
           await restoreManagedLocalState(backupManagedItems, attemptedImportItems);
+          rollbackSucceeded = true;
         } catch (restoreError) {
+          rollbackSucceeded = false;
           errorHandler.logError('restoreManagedLocalState', restoreError);
         }
       }
       errorHandler.logError('importConfig', error);
       const importErrorMessage = error && error.message ? error.message : 'Import failed.';
-      const restoredMessage = localMutated
-        ? `${importErrorMessage} Previous state restored when possible.`
-        : importErrorMessage;
-      showConfigToast(restoredMessage, 'error');
+      showConfigToast(storageHelpers.getImportFailureMessage(
+        importErrorMessage,
+        localMutated,
+        rollbackSucceeded === true
+      ), 'error');
     } finally {
       configTransferInProgress = false;
       setUiMutationLocked(false);
@@ -1112,10 +1242,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (shouldScheduleSave && currentHost && !editor.disabled && currentTabScriptable) {
       const last = lastPersistedByHost[currentHost];
       const nextState = createHostState(currentHost, currentCss, toggleCss.checked);
-      const hasPendingWriteForCurrentHost =
-        (pendingPayload && pendingPayload.host === currentHost) ||
-        persistPromise !== null ||
-        queuedPersistWriteCount > 0;
+      const hasPendingWriteForCurrentHost = hasPendingPersistence(currentHost);
 
       if (last &&
           !hasPendingWriteForCurrentHost &&
@@ -1149,7 +1276,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         skipNextBlurFlush = false;
         return;
       }
-      persistPendingStateOnClose();
+      flushPersistence().catch((error) => {
+        errorHandler.logError('editorBlurFlush', error);
+      });
     });
 
     editor.addEventListener('scroll', () => {
@@ -1192,26 +1321,58 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     toggleCss.addEventListener('change', async () => {
       if (!currentHost || !currentTabScriptable || uiMutationLocked) return;
-      await flushPersistence();
-      if (!currentHost || !currentTabScriptable || uiMutationLocked) return;
-      const wasChecked = toggleCss.checked;
-      toggleLabel.textContent = wasChecked ? 'Enabled' : 'Disabled';
+      const mutation = {
+        host: currentHost,
+        css: currentCss,
+        enabled: toggleCss.checked,
+        previousEnabled: !toggleCss.checked,
+        previousLabel: toggleLabel.textContent,
+        tabContext: getCurrentTabContext(),
+        loadRequestId
+      };
+      let togglePayloadScheduled = false;
+      setUiMutationLocked(true);
 
       try {
-        cancelScheduledPersistence();
-        await writeHostState(currentHost, currentCss, wasChecked);
-        await notifyActiveTab({
-          type: 'css:apply',
-          host: currentHost,
-          css: currentCss,
-          enabled: wasChecked
-        });
-        lastPersistedByHost[currentHost] = { css: currentCss, enabled: wasChecked };
+        if (!await flushPersistence()) {
+          throw persistenceController.getLastError() || new Error('Pending CSS could not be saved.');
+        }
+        if (!isUiMutationContextCurrent(mutation)) {
+          scheduleActiveContextRefresh();
+          return;
+        }
+        const activeContext = await resolveActiveTabContext();
+        if (!isUiMutationContextCurrent(mutation) ||
+            !tabContextMatches(activeContext, mutation.tabContext)) {
+          scheduleActiveContextRefresh();
+          return;
+        }
+
+        schedulePersistence(mutation.host, mutation.css, mutation.enabled);
+        togglePayloadScheduled = true;
+        if (!await flushPersistence()) {
+          throw persistenceController.getLastError() || new Error('The setting could not be saved.');
+        }
+        if (!isUiMutationContextCurrent(mutation)) {
+          scheduleActiveContextRefresh();
+          return;
+        }
+        toggleLabel.textContent = mutation.enabled ? 'Enabled' : 'Disabled';
       } catch (error) {
-        toggleCss.checked = !wasChecked;
-        toggleLabel.textContent = !wasChecked ? 'Enabled' : 'Disabled';
+        if (togglePayloadScheduled) {
+          persistenceController.invalidateHost(mutation.host);
+        }
+        if (!isUiMutationContextCurrent(mutation)) {
+          errorHandler.logError('toggleCss', error);
+          scheduleActiveContextRefresh();
+          return;
+        }
+        toggleCss.checked = mutation.previousEnabled;
+        toggleLabel.textContent = mutation.previousLabel;
         errorHandler.logError('toggleCss', error);
         showConfigToast(getErrorMessage(error), 'error');
+      } finally {
+        setUiMutationLocked(false);
       }
     });
 
@@ -1227,41 +1388,78 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     resetBtn.addEventListener('click', async () => {
       if (!currentHost || !currentTabScriptable || uiMutationLocked) return;
-      const tab = await getActiveTab();
-      const ctx = createTabContext(tab);
-      if (!ctx.url && typeof ctx.id === 'number') {
-        const fallbackHost = await requestTopFrameHost(ctx.id);
-        if (fallbackHost) {
-          ctx.host = fallbackHost;
-          ctx.scriptable = true;
-        }
-      }
-      if (ctx.id !== currentTabId || ctx.url !== currentTabUrl || ctx.host !== currentHost) {
-        await loadCssForCurrentSite({ tabContext: ctx });
-        return;
-      }
-
       const hostToReset = currentHost;
-      cancelScheduledPersistence();
-      await waitForPersistQueue();
-      applyEditorMutation('', { shouldScheduleSave: false });
-      toggleCss.checked = true;
-      toggleLabel.textContent = 'Enabled';
+      const tabContext = getCurrentTabContext();
+      const resetLoadRequestId = loadRequestId;
+      const uiSnapshot = {
+        css: currentCss,
+        editorValue: editor.value,
+        enabled: toggleCss.checked,
+        label: toggleLabel.textContent,
+        selectionStart: editor.selectionStart,
+        selectionEnd: editor.selectionEnd,
+        scrollTop: editor.scrollTop,
+        scrollLeft: editor.scrollLeft
+      };
+      let resetPersistenceInvalidated = false;
+      setUiMutationLocked(true);
 
       try {
+        const activeContext = await resolveActiveTabContext();
+        if (!tabContextMatches(activeContext, tabContext) || activeContext.host !== hostToReset) {
+          scheduleActiveContextRefresh();
+          return;
+        }
+
+        cancelScheduledPersistence(hostToReset);
+        resetPersistenceInvalidated = true;
+        await waitForPersistQueue();
+        applyEditorMutation('', { shouldScheduleSave: false });
+        toggleCss.checked = true;
+        toggleLabel.textContent = 'Enabled';
+
         await storageRemove([hostToReset, `${hostToReset}_enabled`]);
         delete lastPersistedByHost[hostToReset];
-        const clearResult = await notifyActiveTab({ type: 'css:clear' });
+        const clearResult = await notifyActiveTab({
+          type: 'css:clear',
+          host: hostToReset
+        }, { tabContext });
         if (!clearResult.ok &&
             clearResult.reason === 'unreachable' &&
-            currentTabUrl &&
-            isScriptableUrl(currentTabUrl)) {
+            tabContext.url &&
+            isScriptableUrl(tabContext.url)) {
           showConfigToast('CSS removed from storage. Reload the page if styles remain applied.', 'warning');
         } else if (!clearResult.ok && clearResult.reason === 'stale-context') {
           scheduleActiveContextRefresh();
+        } else if (!clearResult.ok && clearResult.reason === 'host-mismatch') {
+          scheduleActiveContextRefresh();
         }
       } catch (error) {
+        const resetContextIsCurrent = currentHost === hostToReset &&
+          currentTabId === tabContext.id &&
+          currentTabUrl === tabContext.url &&
+          loadRequestId === resetLoadRequestId;
+        if (!resetContextIsCurrent) {
+          errorHandler.logError('resetCss', error);
+          scheduleActiveContextRefresh();
+          return;
+        }
+        if (resetPersistenceInvalidated) {
+          schedulePersistence(hostToReset, uiSnapshot.css, uiSnapshot.enabled);
+        }
+        currentCss = uiSnapshot.css;
+        setEditorValue(uiSnapshot.editorValue);
+        toggleCss.checked = uiSnapshot.enabled;
+        toggleLabel.textContent = uiSnapshot.label;
+        editor.selectionStart = uiSnapshot.selectionStart;
+        editor.selectionEnd = uiSnapshot.selectionEnd;
+        editor.scrollTop = uiSnapshot.scrollTop;
+        editor.scrollLeft = uiSnapshot.scrollLeft;
+        updateLineNumbers(true);
         errorHandler.logError('resetCss', error);
+        showConfigToast(getErrorMessage(error), 'error');
+      } finally {
+        setUiMutationLocked(false);
       }
     });
 
@@ -1304,10 +1502,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (namespace !== 'local' || !currentHost || !currentTabScriptable || configTransferInProgress) {
         return;
       }
-      if (hasPendingPersistence() && pendingPayload && pendingPayload.host === currentHost) {
+      if (hasPendingPersistence(currentHost)) {
         return;
       }
       if (!changes[currentHost] && !changes[`${currentHost}_enabled`]) {
+        return;
+      }
+      if (uiMutationLocked) {
+        markActiveContextRefreshPending();
         return;
       }
 

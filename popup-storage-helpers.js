@@ -14,9 +14,23 @@
     if (typeof value !== 'string') return null;
     const trimmedValue = value.trim();
     if (!trimmedValue) return null;
+    if (trimmedValue.startsWith('__')) return null;
     if (/[/\\?#]/.test(trimmedValue)) return null;
+
+    // URL normalizes explicit default ports away (for example, :80 on HTTP),
+    // so reject port syntax before parsing. A bracketed IPv6 literal is the
+    // only valid host form containing colons here, and it must end at `]`.
+    if (trimmedValue.startsWith('[')) {
+      if (!/^\[[^\[\]]+\]$/.test(trimmedValue)) return null;
+    } else if (trimmedValue.includes(':')) {
+      return null;
+    }
+
     try {
       const parsed = new URL(`http://${trimmedValue}`);
+      if (parsed.username || parsed.password || parsed.port || parsed.host !== parsed.hostname) {
+        return null;
+      }
       const normalizedHost = parsed.hostname.toLowerCase();
       if (!normalizedHost || normalizedHost.endsWith('_enabled')) {
         return null;
@@ -151,29 +165,64 @@
   }
 
   function buildKeysToRemove(allItems, importedHosts) {
-    const keysToRemove = [];
-    const existingEntries = getHostEntriesFromStorage(allItems);
+    const keysToRemove = new Set();
+    for (const key of getManagedStorageKeys(allItems)) {
+      const isEnabledKey = key.endsWith('_enabled');
+      const hostKey = isEnabledKey ? key.slice(0, -'_enabled'.length) : key;
+      const normalizedHost = normalizeHostname(hostKey);
+      const canonicalKey = normalizedHost
+        ? `${normalizedHost}${isEnabledKey ? '_enabled' : ''}`
+        : null;
 
-    for (const entry of existingEntries) {
-      if (importedHosts.has(entry.host)) {
-        continue;
+      if (!normalizedHost || !importedHosts.has(normalizedHost) || key !== canonicalKey) {
+        keysToRemove.add(key);
       }
-      keysToRemove.push(entry.storageKey, `${entry.storageKey}_enabled`);
     }
 
-    return keysToRemove;
+    return Array.from(keysToRemove);
+  }
+
+  function getManagedStorageKeys(allItems) {
+    const items = isPlainObject(allItems) ? allItems : {};
+    const managedKeys = new Set();
+
+    for (const [key, value] of Object.entries(items)) {
+      if (isInternalStorageKey(key) || key.startsWith('draft:')) continue;
+
+      if (key.endsWith('_enabled')) {
+        const hostKey = key.slice(0, -'_enabled'.length);
+        if (normalizeHostname(hostKey)) managedKeys.add(key);
+        continue;
+      }
+
+      if (typeof value !== 'string' || !normalizeHostname(key)) continue;
+      managedKeys.add(key);
+      const enabledKey = `${key}_enabled`;
+      if (Object.prototype.hasOwnProperty.call(items, enabledKey)) {
+        managedKeys.add(enabledKey);
+      }
+    }
+
+    return Array.from(managedKeys);
   }
 
   function extractManagedHostItems(allItems) {
     const managedItems = Object.create(null);
-    const existingEntries = getHostEntriesFromStorage(allItems);
-
-    existingEntries.forEach((entry) => {
-      managedItems[entry.storageKey] = entry.css;
-      managedItems[`${entry.storageKey}_enabled`] = entry.enabled;
+    const items = isPlainObject(allItems) ? allItems : {};
+    getManagedStorageKeys(items).forEach((key) => {
+      managedItems[key] = items[key];
     });
 
     return managedItems;
+  }
+
+  function buildPostImportStorage(currentItems, nextItems) {
+    const postImportItems = Object.assign(Object.create(null), currentItems || {});
+    for (const key of getManagedStorageKeys(postImportItems)) {
+      delete postImportItems[key];
+    }
+    Object.assign(postImportItems, nextItems || {});
+    return postImportItems;
   }
 
   function createRestoreKeySet(leftItems, rightItems) {
@@ -205,13 +254,37 @@
   }
 
   function canWriteImportBeforeCleanup(currentItems, nextItems, limits) {
-    const transientItems = Object.assign({}, currentItems || {}, nextItems || {});
+    const transientItems = Object.assign(Object.create(null), currentItems || {}, nextItems || {});
     try {
       assertStorageLimits(transientItems, limits);
       return true;
     } catch {
       return false;
     }
+  }
+
+  function getImportFileSizeLimit(quotaBytes, configuredMinimum = 1024 * 1024) {
+    const hardCap = 192 * 1024 * 1024;
+    const requestedMinimum = Number.isFinite(configuredMinimum) && configuredMinimum > 0
+      ? configuredMinimum
+      : (1024 * 1024);
+    const minimum = Math.min(requestedMinimum, hardCap);
+    if (!Number.isFinite(quotaBytes) || quotaBytes <= 0) return minimum;
+
+    const derivedLimit = Math.min(
+      (quotaBytes * 16) + (4 * 1024 * 1024),
+      hardCap
+    );
+    return Math.max(minimum, Math.ceil(derivedLimit));
+  }
+
+  function getImportFailureMessage(errorMessage, localMutated, rollbackSucceeded) {
+    const message = typeof errorMessage === 'string' && errorMessage
+      ? errorMessage
+      : 'Import failed.';
+    if (!localMutated) return message;
+    if (rollbackSucceeded) return `${message} Previous state was restored.`;
+    return `${message} Warning: automatic rollback did not complete; restore a backup before continuing.`;
   }
 
   function chunkObjectEntries(items, chunkSize) {
@@ -269,9 +342,13 @@
     buildExportPayload,
     parseImportPayload,
     buildKeysToRemove,
+    getManagedStorageKeys,
     extractManagedHostItems,
+    buildPostImportStorage,
     createRestoreKeySet,
     canWriteImportBeforeCleanup,
+    getImportFileSizeLimit,
+    getImportFailureMessage,
     assertStorageLimits,
     estimateStorageUsage,
     chunkObjectEntries,

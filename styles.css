@@ -283,6 +283,10 @@ input:checked+.slider:before {
   resize: none;
 }
 
+#line-numbers.is-suppressed {
+  display: none;
+}
+
 #css-editor {
   position: absolute;
   inset: 0;
