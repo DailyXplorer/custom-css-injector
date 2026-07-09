@@ -435,6 +435,48 @@
     }
   }
 
+  function recreateManagedConstructedSheetForCascadePriority(preferredScope) {
+    if (managedStyleMode !== 'adopted' || !managedConstructedSheet || !managedConstructedCss) {
+      return null;
+    }
+
+    const previousSheet = managedConstructedSheet;
+    let replacementSheet;
+    try {
+      replacementSheet = new CSSStyleSheet();
+      replacementSheet.disabled = false;
+      writeManagedConstructedSheet(replacementSheet, managedConstructedCss);
+    } catch {
+      return null;
+    }
+
+    managedConstructedSheet = replacementSheet;
+    managedConstructedSheetFresh = false;
+    managedConstructedFingerprint = getConstructedSheetFingerprint(replacementSheet);
+    managedConstructedLastFullCheck = Date.now();
+
+    const scopes = new Set([document, preferredScope, ...Array.from(trackedShadowRoots)]);
+    let preferredScopeUpdated = false;
+    for (const scope of scopes) {
+      if (!scope) continue;
+      try {
+        const currentSheets = scope.adoptedStyleSheets;
+        if (!Array.isArray(currentSheets)) continue;
+        const nextSheets = currentSheets.filter((sheet) => (
+          sheet !== previousSheet &&
+          sheet !== replacementSheet &&
+          !isManagedConstructedSheet(sheet)
+        ));
+        scope.adoptedStyleSheets = [...nextSheets, replacementSheet];
+        sweptConstructedSheetScopes.add(scope);
+        if (scope === preferredScope) preferredScopeUpdated = true;
+      } catch {
+      }
+    }
+
+    return preferredScopeUpdated;
+  }
+
   function ensureConstructedSheetInScope(scope) {
     if (managedStyleMode !== 'adopted' || !managedConstructedSheet || !scope) return false;
     try {
@@ -445,6 +487,15 @@
       const currentSheets = scope.adoptedStyleSheets;
       if (!Array.isArray(currentSheets)) return false;
       if (currentSheets[currentSheets.length - 1] === managedConstructedSheet) return true;
+      const containsManagedSheet = currentSheets.includes(managedConstructedSheet);
+      const containsForeignSheet = currentSheets.some((sheet) => sheet !== managedConstructedSheet);
+      if (containsForeignSheet && (containsManagedSheet || !managedConstructedSheetFresh)) {
+        // Chromium keeps the original cascade position when an already-adopted
+        // constructed sheet is merely reordered. A fresh shared sheet is needed
+        // to regain priority over a sheet the page created later.
+        const recreated = recreateManagedConstructedSheetForCascadePriority(scope);
+        if (recreated !== null) return recreated;
+      }
       scope.adoptedStyleSheets = [
         ...currentSheets.filter((sheet) => sheet !== managedConstructedSheet),
         managedConstructedSheet
@@ -526,10 +577,15 @@
       if (repairedSheet !== previousSheet) {
         removeConstructedSheetEverywhere();
         managedConstructedSheet = repairedSheet;
-        sweepManagedConstructedSheetsFromScope(document, repairedSheet);
-        ensureConstructedSheetInScope(document);
-        for (const shadowRoot of Array.from(trackedShadowRoots)) {
-          ensureConstructedSheetInScope(shadowRoot);
+        managedConstructedSheetFresh = true;
+        try {
+          sweepManagedConstructedSheetsFromScope(document, repairedSheet);
+          ensureConstructedSheetInScope(document);
+          for (const shadowRoot of Array.from(trackedShadowRoots)) {
+            ensureConstructedSheetInScope(shadowRoot);
+          }
+        } finally {
+          managedConstructedSheetFresh = false;
         }
         scheduleAdoptedSheetGuard();
       }
@@ -643,6 +699,7 @@
           }
         }
         managedConstructedSheet = nextSheet;
+        managedConstructedSheetFresh = nextSheet !== previousSheet;
         managedConstructedCss = cssContent;
         managedConstructedBaseUrl = currentBaseUrl;
         managedConstructedFingerprint = getConstructedSheetFingerprint(nextSheet);
@@ -660,6 +717,7 @@
       removeConstructedSheetEverywhere();
     }
     managedConstructedSheet = null;
+    managedConstructedSheetFresh = false;
     managedConstructedCss = '';
     managedConstructedBaseUrl = '';
     managedConstructedFingerprint = null;
@@ -672,9 +730,13 @@
     if (managedStyleMode !== 'adopted' || managedConstructedBaseUrl === getDocumentCssBaseUrl()) return false;
     const hostname = shadowState.host || lastApplied.host;
     prepareManagedStyleMode(managedConstructedCss, hostname);
-    applyDocumentCSS(managedConstructedCss, hostname);
-    for (const shadowRoot of Array.from(trackedShadowRoots)) {
-      ensureShadowManagedStyle(shadowRoot, hostname, managedConstructedCss);
+    try {
+      applyDocumentCSS(managedConstructedCss, hostname);
+      for (const shadowRoot of Array.from(trackedShadowRoots)) {
+        ensureShadowManagedStyle(shadowRoot, hostname, managedConstructedCss);
+      }
+    } finally {
+      managedConstructedSheetFresh = false;
     }
     return true;
   }
@@ -704,6 +766,7 @@
 
     clearShadowCSS(hostname);
     managedConstructedSheet = null;
+    managedConstructedSheetFresh = false;
     managedConstructedCss = '';
     managedConstructedBaseUrl = '';
     managedConstructedFingerprint = null;
@@ -724,6 +787,8 @@
       applyShadowCSS(hostname, cssContent, forceShadowRescan);
     } catch (error) {
       console.error('[CSS Injector] Failed to inject CSS:', error);
+    } finally {
+      managedConstructedSheetFresh = false;
     }
   }
 
@@ -1358,6 +1423,7 @@
   let shadowState = { active: false, host: '', css: '' };
   let managedStyleMode = 'none';
   let managedConstructedSheet = null;
+  let managedConstructedSheetFresh = false;
   let managedConstructedCss = '';
   let managedConstructedBaseUrl = '';
   let managedConstructedFingerprint = null;
