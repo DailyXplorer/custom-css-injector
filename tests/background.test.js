@@ -9,11 +9,17 @@ const {
 
 const MIGRATION_FLAG = '__cssInjectorMigratedSyncToLocal';
 const backgroundModulePath = require.resolve('../background.js');
+require('./load-extension-globals.js');
 
 function loadBackground(stub) {
   globalThis.chrome = stub.chrome;
   delete require.cache[backgroundModulePath];
-  require(backgroundModulePath);
+  globalThis.importScripts = () => {};
+  try {
+    require(backgroundModulePath);
+  } finally {
+    delete globalThis.importScripts;
+  }
 }
 
 async function settle(turns = 6) {
@@ -204,6 +210,78 @@ test('migration preserves its data-write, sync-drain, draft-cleanup, marker orde
     'local:remove',
     'local:set'
   ]);
+});
+
+test('an update restores configured HTTP tabs after migration and skips unsupported or discarded tabs', async (t) => {
+  const stub = setupBackground(t, {
+    sync: { 'saved.example': 'body { color: red; }' },
+    local: { 'disabled.example': 'body { color: blue; }', 'disabled.example_enabled': false,
+      'chromewebstore.google.com': 'body {}', 'microsoftedge.microsoft.com': 'body {}' }
+  });
+  stub.chrome.tabs.query = async () => [
+    { id: 1, url: 'https://saved.example/path' },
+    { id: 2, url: 'http://disabled.example/' },
+    { id: 3, url: 'https://other.example/' },
+    { id: 4, url: 'chrome://settings/' },
+    { id: 5, url: 'https://chromewebstore.google.com/' },
+    { id: 6, url: 'https://saved.example/', discarded: true },
+    { id: 7, url: 'https://microsoftedge.microsoft.com/addons/detail/example' }
+  ];
+  const restored = [];
+  stub.chrome.scripting = {
+    async executeScript(injection) {
+      assert.equal(stub.getStorageSnapshot('local')['saved.example'], 'body { color: red; }');
+      if (injection.func) return [{ frameId: 0, documentId: `document-${injection.target.tabId}`, result: { requiresReload: false } }];
+      restored.push(injection);
+      return [{ frameId: 0 }];
+    }
+  };
+  stub.listeners.onInstalled[0]({ reason: 'update' });
+  await settle();
+  for (const tabId of [1, 2]) {
+    assert.deepEqual(restored.filter(({ target }) => target.tabId === tabId), [
+      { target: { tabId, documentIds: [`document-${tabId}`] }, injectImmediately: true, world: 'MAIN', files: ['shadow-dom-bridge.js'] },
+      { target: { tabId, documentIds: [`document-${tabId}`] }, injectImmediately: true, world: 'ISOLATED', files: ['utils.js', 'constants.js', 'content-script.js'] }
+    ]);
+  }
+  assert.equal(restored.length, 4);
+  assert.equal(stub.getStorageSnapshot('local')['disabled.example_enabled'], false);
+});
+
+test('update restoration falls back to frame zero and a closed tab cannot prevent another tab from recovering', async (t) => {
+  muteConsoleWarn(t);
+  const stub = setupBackground(t, { local: { 'saved.example': 'body {}' } });
+  stub.chrome.tabs.query = async () => [
+    { id: 1, url: 'https://saved.example/closed' },
+    { id: 2, url: 'https://saved.example/restricted-frame' }
+  ];
+  const delivered = [];
+  stub.chrome.scripting = {
+    async executeScript(injection) {
+      if (injection.target.tabId === 1) throw new Error('No tab with id 1');
+      if (injection.target.allFrames) throw new Error('Cannot access a frame');
+      if (injection.func) return [{ frameId: 0, documentId: 'top-document', result: { requiresReload: false } }];
+      delivered.push({ world: injection.world, target: injection.target });
+      return [{ frameId: 0 }];
+    }
+  };
+  stub.listeners.onInstalled[0]({ reason: 'update' });
+  await settle();
+  assert.deepEqual(delivered, [
+    { world: 'MAIN', target: { tabId: 2, documentIds: ['top-document'] } },
+    { world: 'ISOLATED', target: { tabId: 2, documentIds: ['top-document'] } }
+  ]);
+});
+
+test('fresh installation and ordinary worker startup do not enumerate open tabs', async (t) => {
+  const stub = setupBackground(t, { sync: { 'saved.example': 'body {}' } });
+  let queried = false;
+  stub.chrome.tabs.query = async () => { queried = true; return []; };
+  stub.listeners.onInstalled[0]({ reason: 'install' });
+  stub.listeners.onStartup[0]();
+  await settle();
+  assert.equal(stub.getStorageSnapshot('local')['saved.example'], 'body {}');
+  assert.equal(queried, false);
 });
 
 test('trusted ping messages receive an ok response', async (t) => {

@@ -5,6 +5,7 @@
     ? globalThis
     : (typeof window !== 'undefined' ? window : this);
   const sharedTextEncoder = typeof TextEncoder === 'function' ? new TextEncoder() : null;
+  const MIN_SAFE_BRIDGE_VERSION = 3;
 
   function withTimeout(promise, ms, errorMessage) {
     let timeoutId;
@@ -323,7 +324,97 @@
     return false;
   }
 
+  function cssMayDependOnBaseUrl(value) {
+    if (typeof value !== 'string' || !value) return false;
+
+    const urlFunctions = new Set(['url', 'src', 'image', 'image-set', '-webkit-image-set']);
+    for (let index = 0; index < value.length; index += 1) {
+      const character = value[index];
+      if (character === '/' && value[index + 1] === '*') {
+        const end = value.indexOf('*/', index + 2);
+        if (end === -1) return false;
+        index = end + 1;
+        continue;
+      }
+      if (character === '"' || character === "'") {
+        for (index += 1; index < value.length; index += 1) {
+          if (value[index] === '\\') {
+            index += value[index + 1] === '\r' && value[index + 2] === '\n' ? 2 : 1;
+          } else if (value[index] === character || /[\n\r\f]/.test(value[index])) {
+            break;
+          }
+        }
+        continue;
+      }
+
+      const isAtKeyword = character === '@';
+      if (!isAtKeyword && !isCssNameCode(value.charCodeAt(index)) && character !== '\\') continue;
+      let cursor = isAtKeyword ? index + 1 : index;
+      let identifier = '';
+      while (cursor < value.length) {
+        if (isCssNameCode(value.charCodeAt(cursor))) {
+          identifier += value[cursor++];
+        } else if (value[cursor] === '\\') {
+          const escape = consumeCssIdentifierEscape(value, cursor);
+          if (!escape.valid) break;
+          identifier += escape.value;
+          cursor = escape.nextIndex;
+        } else {
+          break;
+        }
+      }
+      identifier = identifier.toLowerCase();
+      if (isAtKeyword && identifier === 'import') return true;
+      if (!isAtKeyword && value[cursor] === '(' && urlFunctions.has(identifier)) return true;
+      index = Math.max(index, cursor - 1);
+    }
+    return false;
+  }
+
+  async function reinjectContentScripts(tabId) {
+    const inspect = (target) => chrome.scripting.executeScript({
+      target,
+      world: 'MAIN',
+      args: [MIN_SAFE_BRIDGE_VERSION],
+      func: (minimumVersion) => {
+        const bridge = globalThis.__CSSInjectorShadowBridgeRuntime;
+        const attachShadow = globalThis.Element?.prototype.attachShadow;
+        return {
+          requiresReload: !!(
+            (bridge && !(Number.isInteger(bridge.version) && bridge.version >= minimumVersion)) ||
+            (attachShadow?.__cssInjectorShadowBridgeWrapped && !(
+              Number.isInteger(attachShadow.__cssInjectorShadowBridgeVersion) &&
+              attachShadow.__cssInjectorShadowBridgeVersion >= minimumVersion
+            ))
+          )
+        };
+      }
+    });
+    let frames;
+    try {
+      frames = await inspect({ tabId, allFrames: true });
+    } catch {
+      frames = await inspect({ tabId });
+    }
+    if (frames.some((frame) => frame.result?.requiresReload)) {
+      return { ok: false, requiresReload: true };
+    }
+    if (!frames.length || frames.some((frame) => typeof frame.documentId !== 'string')) {
+      throw new Error('Could not identify the documents to restore.');
+    }
+    const target = { tabId, documentIds: frames.map((frame) => frame.documentId) };
+    await chrome.scripting.executeScript({
+      target, injectImmediately: true, world: 'MAIN', files: ['shadow-dom-bridge.js']
+    });
+    await chrome.scripting.executeScript({
+      target, injectImmediately: true, world: 'ISOLATED', files: ['utils.js', 'constants.js', 'content-script.js']
+    });
+    return { ok: true };
+  }
+
   const exposedUtils = {
+    MIN_SAFE_BRIDGE_VERSION,
+    reinjectContentScripts,
     getCurrentHostname: function () {
       try {
         return window.location.hostname;
@@ -445,6 +536,8 @@
     hasTopLevelCssImport: function (value) {
       return hasTopLevelCssImport(value);
     },
+
+    cssMayDependOnBaseUrl,
 
     getErrorMessage: function (error, fallbackMessage) {
       return getErrorMessage(error, fallbackMessage);

@@ -5,7 +5,7 @@
     ? globalThis
     : (typeof window !== 'undefined' ? window : this);
   const runtimeKey = '__CSSInjectorContentScriptRuntime';
-  const runtimeVersion = 2;
+  const runtimeVersion = 3;
   const existingRuntime = root[runtimeKey];
 
   if (existingRuntime &&
@@ -81,6 +81,8 @@
   })();
   const STYLE_OWNER_ATTRIBUTE = 'data-css-injector-owner';
   const STYLE_OWNER_VALUE = `${extensionRuntimeId}:v2`;
+  const STYLE_RUNTIME_ATTRIBUTE = 'data-css-injector-runtime';
+  const STYLE_RUNTIME_VALUE = crypto.getRandomValues(new Uint32Array(4)).join('-');
   const LEGACY_STYLE_PRIORITY_ATTRIBUTE = 'data-css-injector-priority';
   const LEGACY_SHADOW_STYLE_ATTRIBUTE = 'data-css-injector-shadow-bridge';
   const LEGACY_DISABLED_ATTRIBUTE = 'data-css-injector-legacy-disabled';
@@ -278,7 +280,7 @@
   }
 
   function attachManagedStyle(style, retries = 3) {
-    if (disposed) return;
+    if (!ensureRuntimeActive()) return;
     const parentNode = getDocumentStyleParent();
     if (parentNode) {
       if (style.parentNode !== parentNode || parentNode.lastElementChild !== style) {
@@ -326,6 +328,7 @@
   function normalizeManagedStyleElement(style) {
     if (!style || typeof style.removeAttribute !== 'function') return;
     style.setAttribute(STYLE_OWNER_ATTRIBUTE, STYLE_OWNER_VALUE);
+    style.setAttribute(STYLE_RUNTIME_ATTRIBUTE, STYLE_RUNTIME_VALUE);
     style.removeAttribute('media');
     style.removeAttribute('type');
   }
@@ -333,6 +336,16 @@
   function isOwnedManagedStyleNode(style) {
     if (!style || typeof style.getAttribute !== 'function') return false;
     return style.getAttribute(STYLE_OWNER_ATTRIBUTE) === STYLE_OWNER_VALUE;
+  }
+
+  function isCurrentRuntimeStyleNode(style) {
+    return style.getAttribute(STYLE_RUNTIME_ATTRIBUTE) === STYLE_RUNTIME_VALUE;
+  }
+
+  function removeCachedManagedStyleNode(style) {
+    if (!disposed || !style.hasAttribute(STYLE_RUNTIME_ATTRIBUTE) || isCurrentRuntimeStyleNode(style)) {
+      style.remove();
+    }
   }
 
   function isLegacyManagedStyleNode(style, isShadowScope) {
@@ -451,7 +464,7 @@
     }
 
     managedConstructedSheet = replacementSheet;
-    managedConstructedSheetFresh = false;
+    managedConstructedBaseUrl = getDocumentCssBaseUrl();
     managedConstructedFingerprint = getConstructedSheetFingerprint(replacementSheet);
     managedConstructedLastFullCheck = Date.now();
 
@@ -489,7 +502,7 @@
       if (currentSheets[currentSheets.length - 1] === managedConstructedSheet) return true;
       const containsManagedSheet = currentSheets.includes(managedConstructedSheet);
       const containsForeignSheet = currentSheets.some((sheet) => sheet !== managedConstructedSheet);
-      if (containsForeignSheet && (containsManagedSheet || !managedConstructedSheetFresh)) {
+      if (containsForeignSheet && containsManagedSheet) {
         // Chromium keeps the original cascade position when an already-adopted
         // constructed sheet is merely reordered. A fresh shared sheet is needed
         // to regain priority over a sheet the page created later.
@@ -577,15 +590,11 @@
       if (repairedSheet !== previousSheet) {
         removeConstructedSheetEverywhere();
         managedConstructedSheet = repairedSheet;
-        managedConstructedSheetFresh = true;
-        try {
-          sweepManagedConstructedSheetsFromScope(document, repairedSheet);
-          ensureConstructedSheetInScope(document);
-          for (const shadowRoot of Array.from(trackedShadowRoots)) {
-            ensureConstructedSheetInScope(shadowRoot);
-          }
-        } finally {
-          managedConstructedSheetFresh = false;
+        managedConstructedBaseUrl = getDocumentCssBaseUrl();
+        sweepManagedConstructedSheetsFromScope(document, repairedSheet);
+        ensureConstructedSheetInScope(document);
+        for (const shadowRoot of Array.from(trackedShadowRoots)) {
+          ensureConstructedSheetInScope(shadowRoot);
         }
         scheduleAdoptedSheetGuard();
       }
@@ -610,10 +619,10 @@
   }
 
   function scheduleNodeFallbackGuard() {
-    if (disposed || managedStyleMode !== 'node' || nodeFallbackGuardTimer !== null) return;
+    if (!ensureRuntimeActive() || managedStyleMode !== 'node' || nodeFallbackGuardTimer !== null) return;
     nodeFallbackGuardTimer = setTimeout(() => {
       nodeFallbackGuardTimer = null;
-      if (disposed || managedStyleMode !== 'node' || !shadowState.active) return;
+      if (!ensureRuntimeActive() || managedStyleMode !== 'node' || !shadowState.active) return;
       applyDocumentCSS(shadowState.css, shadowState.host);
       for (const shadowRoot of Array.from(trackedShadowRoots)) {
         ensureShadowManagedStyle(shadowRoot, shadowState.host, shadowState.css);
@@ -623,10 +632,10 @@
   }
 
   function scheduleAdoptedSheetGuard() {
-    if (disposed || managedStyleMode !== 'adopted' || adoptedSheetGuardTimer !== null) return;
+    if (!ensureRuntimeActive() || managedStyleMode !== 'adopted' || adoptedSheetGuardTimer !== null) return;
     adoptedSheetGuardTimer = setTimeout(() => {
       adoptedSheetGuardTimer = null;
-      if (disposed || managedStyleMode !== 'adopted' || !shadowState.active) return;
+      if (!ensureRuntimeActive() || managedStyleMode !== 'adopted' || !shadowState.active) return;
       refreshConstructedSheetBaseIfNeeded();
       repairConstructedSheetContents();
       applyDocumentCSS(managedConstructedCss, shadowState.host);
@@ -647,10 +656,12 @@
 
   function removeDocumentManagedStyleNodes(hostname) {
     if (managedStyleCache.host === hostname && managedStyleCache.node) {
-      managedStyleCache.node.remove();
+      removeCachedManagedStyleNode(managedStyleCache.node);
     }
-    if (!documentManagedNodesSwept) {
-      getInjectedStylesForHostname(hostname).forEach((styleNode) => styleNode.remove());
+    if (disposed || !documentManagedNodesSwept) {
+      getInjectedStylesForHostname(hostname)
+        .filter((styleNode) => !disposed || isCurrentRuntimeStyleNode(styleNode))
+        .forEach((styleNode) => styleNode.remove());
       documentManagedNodesSwept = true;
     }
     if (managedStyleCache.host === hostname) {
@@ -662,11 +673,15 @@
 
   function prepareManagedStyleMode(cssContent, hostname) {
     managedCssNeedsImportFallback = cssNeedsImportFallback(cssContent);
+    managedCssMayDependOnBaseUrl = typeof CSSInjectorUtils !== 'undefined' &&
+      typeof CSSInjectorUtils.cssMayDependOnBaseUrl === 'function'
+      ? CSSInjectorUtils.cssMayDependOnBaseUrl(cssContent)
+      : /["'\\]|(?:url|src)\s*\(/i.test(cssContent);
     if (canUseConstructedStylesheet()) {
       const currentBaseUrl = getDocumentCssBaseUrl();
       const canReuseSheet = managedStyleMode === 'adopted' &&
         managedConstructedSheet &&
-        managedConstructedBaseUrl === currentBaseUrl;
+        (!managedCssMayDependOnBaseUrl || managedConstructedBaseUrl === currentBaseUrl);
       const previousSheet = managedConstructedSheet;
       let nextSheet = canReuseSheet ? managedConstructedSheet : null;
       try {
@@ -699,9 +714,8 @@
           }
         }
         managedConstructedSheet = nextSheet;
-        managedConstructedSheetFresh = nextSheet !== previousSheet;
         managedConstructedCss = cssContent;
-        managedConstructedBaseUrl = currentBaseUrl;
+        if (nextSheet !== previousSheet) managedConstructedBaseUrl = currentBaseUrl;
         managedConstructedFingerprint = getConstructedSheetFingerprint(nextSheet);
         managedConstructedLastFullCheck = Date.now();
         managedStyleMode = 'adopted';
@@ -717,7 +731,6 @@
       removeConstructedSheetEverywhere();
     }
     managedConstructedSheet = null;
-    managedConstructedSheetFresh = false;
     managedConstructedCss = '';
     managedConstructedBaseUrl = '';
     managedConstructedFingerprint = null;
@@ -727,18 +740,18 @@
   }
 
   function refreshConstructedSheetBaseIfNeeded() {
-    if (managedStyleMode !== 'adopted' || managedConstructedBaseUrl === getDocumentCssBaseUrl()) return false;
+    if (managedStyleMode !== 'adopted' || isConstructedSheetBaseCurrent()) return false;
     const hostname = shadowState.host || lastApplied.host;
     prepareManagedStyleMode(managedConstructedCss, hostname);
-    try {
-      applyDocumentCSS(managedConstructedCss, hostname);
-      for (const shadowRoot of Array.from(trackedShadowRoots)) {
-        ensureShadowManagedStyle(shadowRoot, hostname, managedConstructedCss);
-      }
-    } finally {
-      managedConstructedSheetFresh = false;
+    applyDocumentCSS(managedConstructedCss, hostname);
+    for (const shadowRoot of Array.from(trackedShadowRoots)) {
+      ensureShadowManagedStyle(shadowRoot, hostname, managedConstructedCss);
     }
     return true;
+  }
+
+  function isConstructedSheetBaseCurrent() {
+    return !managedCssMayDependOnBaseUrl || managedConstructedBaseUrl === getDocumentCssBaseUrl();
   }
 
   function dispatchLegacyShadowBridgeClear(hostname) {
@@ -766,7 +779,6 @@
 
     clearShadowCSS(hostname);
     managedConstructedSheet = null;
-    managedConstructedSheetFresh = false;
     managedConstructedCss = '';
     managedConstructedBaseUrl = '';
     managedConstructedFingerprint = null;
@@ -787,8 +799,6 @@
       applyShadowCSS(hostname, cssContent, forceShadowRescan);
     } catch (error) {
       console.error('[CSS Injector] Failed to inject CSS:', error);
-    } finally {
-      managedConstructedSheetFresh = false;
     }
   }
 
@@ -799,7 +809,7 @@
     if (managedStyleMode === 'adopted') {
       return !!managedConstructedSheet &&
         managedConstructedCss === cssContent &&
-        managedConstructedBaseUrl === getDocumentCssBaseUrl();
+        isConstructedSheetBaseCurrent();
     }
     return managedStyleMode === 'node';
   }
@@ -987,7 +997,7 @@
 
     const cached = shadowStyleCache.get(shadowRoot);
     if (cached && cached.host === hostname && cached.node) {
-      cached.node.remove();
+      removeCachedManagedStyleNode(cached.node);
       shadowStyleCache.delete(shadowRoot);
     }
 
@@ -997,7 +1007,9 @@
       shadowStyleObservers.delete(shadowRoot);
     }
 
-    getShadowStylesForHost(shadowRoot, hostname).forEach((styleNode) => styleNode.remove());
+    getShadowStylesForHost(shadowRoot, hostname)
+      .filter((styleNode) => !disposed || isCurrentRuntimeStyleNode(styleNode))
+      .forEach((styleNode) => styleNode.remove());
   }
 
   function removeShadowManagedStyles(shadowRoot, hostname) {
@@ -1054,7 +1066,7 @@
   }
 
   function queueShadowDiscovery(startNode) {
-    if (disposed || !shadowState.active) return;
+    if (!ensureRuntimeActive() || !shadowState.active) return;
     if (startNode !== document && !isElementNode(startNode) && !isShadowRoot(startNode)) return;
 
     pendingShadowDiscoveryTargets.add(startNode || document);
@@ -1066,7 +1078,7 @@
       const candidates = Array.from(pendingShadowDiscoveryTargets);
       pendingShadowDiscoveryTargets.clear();
 
-      if (disposed || !shadowState.active) return;
+      if (!ensureRuntimeActive() || !shadowState.active) return;
       if (candidates.includes(document)) {
         discoverShadowRootsFromNode(document);
         return;
@@ -1122,7 +1134,7 @@
   }
 
   function queueShadowRootRecovery(shadowRoot) {
-    if (disposed || !shadowState.active || !trackedShadowRoots.has(shadowRoot)) return;
+    if (!ensureRuntimeActive() || !shadowState.active || !trackedShadowRoots.has(shadowRoot)) return;
 
     pendingShadowRootRecoveries.add(shadowRoot);
     if (shadowRecoveryScheduled) return;
@@ -1141,7 +1153,7 @@
       const roots = Array.from(pendingShadowRootRecoveries);
       pendingShadowRootRecoveries.clear();
 
-      if (disposed || !shadowState.active) return;
+      if (!ensureRuntimeActive() || !shadowState.active) return;
       for (const rootToRepair of roots) {
         if (!trackedShadowRoots.has(rootToRepair)) continue;
         ensureShadowManagedStyle(rootToRepair, shadowState.host, shadowState.css);
@@ -1162,6 +1174,7 @@
   }
 
   function cleanupDisconnectedShadowRoots() {
+    if (!ensureRuntimeActive()) return;
     shadowCleanupTimer = null;
 
     for (const shadowRoot of Array.from(trackedShadowRoots)) {
@@ -1184,6 +1197,7 @@
   }
 
   function handleShadowRootMutations(shadowRoot, mutations) {
+    if (!ensureRuntimeActive()) return;
     if (!shadowState.active || !trackedShadowRoots.has(shadowRoot)) return;
 
     let removedNodes = false;
@@ -1235,6 +1249,7 @@
         cached.node.parentNode !== shadowRoot ||
         cached.node.getAttribute(STYLE_DATA_ATTRIBUTE) !== shadowState.host ||
         cached.node.getAttribute(STYLE_OWNER_ATTRIBUTE) !== STYLE_OWNER_VALUE ||
+        !isCurrentRuntimeStyleNode(cached.node) ||
         cached.node.hasAttribute('media') ||
         cached.node.hasAttribute('type') ||
         cached.node.textContent !== shadowState.css ||
@@ -1244,6 +1259,7 @@
   }
 
   function handleShadowStyleMutations(shadowRoot) {
+    if (!ensureRuntimeActive()) return;
     const maintainsNode = managedStyleMode === 'node' ||
       (managedStyleMode === 'adopted' && managedCssNeedsImportFallback);
     if (!maintainsNode || !shadowState.active || !trackedShadowRoots.has(shadowRoot)) return;
@@ -1255,6 +1271,7 @@
         cached.node.parentNode !== shadowRoot ||
         cached.node.getAttribute(STYLE_DATA_ATTRIBUTE) !== shadowState.host ||
         cached.node.getAttribute(STYLE_OWNER_ATTRIBUTE) !== STYLE_OWNER_VALUE ||
+        !isCurrentRuntimeStyleNode(cached.node) ||
         cached.node.hasAttribute('media') ||
         cached.node.hasAttribute('type') ||
         cached.node.textContent !== shadowState.css ||
@@ -1273,7 +1290,7 @@
     const observer = new MutationObserver(() => handleShadowStyleMutations(shadowRoot));
     observer.observe(style, {
       attributes: true,
-      attributeFilter: [STYLE_DATA_ATTRIBUTE, STYLE_OWNER_ATTRIBUTE, 'media', 'type'],
+      attributeFilter: [STYLE_DATA_ATTRIBUTE, STYLE_OWNER_ATTRIBUTE, STYLE_RUNTIME_ATTRIBUTE, 'media', 'type'],
       childList: true,
       characterData: true,
       subtree: true
@@ -1423,12 +1440,12 @@
   let shadowState = { active: false, host: '', css: '' };
   let managedStyleMode = 'none';
   let managedConstructedSheet = null;
-  let managedConstructedSheetFresh = false;
   let managedConstructedCss = '';
   let managedConstructedBaseUrl = '';
   let managedConstructedFingerprint = null;
   let managedConstructedLastFullCheck = 0;
   let managedCssNeedsImportFallback = false;
+  let managedCssMayDependOnBaseUrl = false;
   let adoptedSheetGuardTimer = null;
   let nodeFallbackGuardTimer = null;
   const STYLE_GUARD_RECOVERY_WINDOW_MS = 1000;
@@ -1510,7 +1527,7 @@
   }
 
   function queueManagedStyleRecovery() {
-    if (disposed || styleGuardScheduled) {
+    if (!ensureRuntimeActive() || styleGuardScheduled) {
       return;
     }
 
@@ -1526,7 +1543,7 @@
       styleGuardRecoveryTimer = null;
       styleGuardScheduled = false;
 
-      if (disposed) return;
+      if (!ensureRuntimeActive()) return;
 
       const hostname = lastApplied.host;
       if (!shouldMaintainManagedStyle(hostname)) {
@@ -1569,6 +1586,7 @@
   }
 
   function handleManagedStyleMutations(mutations) {
+    if (!ensureRuntimeActive()) return;
     ensureDomEventListeners();
 
     let documentAddedManagedStyle = false;
@@ -1643,6 +1661,7 @@
   }
 
   function handleManagedStyleNodeMutations() {
+    if (!ensureRuntimeActive()) return;
     const hostname = lastApplied.host;
     const style = managedStyleCache.host === hostname ? managedStyleCache.node : null;
     if (!shouldMaintainManagedStyleNode(hostname) || !style) return;
@@ -1650,6 +1669,7 @@
     if (!style.isConnected ||
         style.getAttribute(STYLE_DATA_ATTRIBUTE) !== hostname ||
         style.getAttribute(STYLE_OWNER_ATTRIBUTE) !== STYLE_OWNER_VALUE ||
+        !isCurrentRuntimeStyleNode(style) ||
         style.hasAttribute('media') ||
         style.hasAttribute('type') ||
         style.textContent !== lastApplied.css) {
@@ -1685,7 +1705,7 @@
     managedStyleNodeObserver = new MutationObserver(handleManagedStyleNodeMutations);
     managedStyleNodeObserver.observe(style, {
       attributes: true,
-      attributeFilter: [STYLE_DATA_ATTRIBUTE, STYLE_OWNER_ATTRIBUTE, 'media', 'type'],
+      attributeFilter: [STYLE_DATA_ATTRIBUTE, STYLE_OWNER_ATTRIBUTE, STYLE_RUNTIME_ATTRIBUTE, 'media', 'type'],
       childList: true,
       characterData: true,
       subtree: true
@@ -1727,6 +1747,13 @@
     }
   }
 
+  function ensureRuntimeActive() {
+    if (disposed) return false;
+    if (isExtensionContextValid()) return true;
+    disposeRuntime();
+    return false;
+  }
+
   function resetTopHostResolutionRetry() {
     topHostRetryIndex = 0;
     if (topHostRetryTimer !== null) {
@@ -1736,22 +1763,21 @@
   }
 
   function scheduleTopHostResolutionRetry() {
-    if (disposed || isTopFrame() || !isExtensionContextValid() || topHostRetryTimer !== null) return;
+    if (!ensureRuntimeActive() || isTopFrame() || topHostRetryTimer !== null) return;
     if (topHostRetryIndex >= TOP_HOST_RETRY_DELAYS_MS.length) return;
 
     const delayMs = TOP_HOST_RETRY_DELAYS_MS[topHostRetryIndex];
     topHostRetryIndex += 1;
     topHostRetryTimer = setTimeout(() => {
       topHostRetryTimer = null;
-      if (disposed || !isExtensionContextValid()) return;
+      if (!ensureRuntimeActive()) return;
       scheduleInjection(true, true, false);
     }, delayMs);
   }
 
   async function loadAndApplyCSS(forceStorageRead = false, forceDomReassert = false) {
-    if (disposed) return;
+    if (!ensureRuntimeActive()) return;
     const requestId = ++latestLoadRequestId;
-    if (!isExtensionContextValid()) return;
 
     const hostname = await resolveManagedHostname(forceStorageRead);
     if (!hostname) {
@@ -1792,7 +1818,7 @@
       const isEnabled = effectiveState.enabled;
 
       const currentManagedHostname = await resolveManagedHostname(false);
-      if (disposed || requestId !== latestLoadRequestId || currentManagedHostname !== hostname) {
+      if (!ensureRuntimeActive() || requestId !== latestLoadRequestId || currentManagedHostname !== hostname) {
         return;
       }
       if (shouldUpdateStorageCache) {
@@ -1803,7 +1829,7 @@
       if (effectKey === lastApplied.effectKey && hostname === lastApplied.host) {
         const documentElementChanged = shadowScannedDocumentElement !== document.documentElement;
         const managedBaseUrlChanged = managedStyleMode === 'adopted'
-          ? managedConstructedBaseUrl !== getDocumentCssBaseUrl()
+          ? !isConstructedSheetBaseCurrent()
           : managedStyleMode === 'node' && managedStyleCache.baseUrl !== getDocumentCssBaseUrl();
         if (forceDomReassert || documentElementChanged || managedBaseUrlChanged) {
           if (css && isEnabled) {
@@ -1859,7 +1885,7 @@
   }
 
   function scheduleInjection(force = false, forceStorageRead = false, forceDomReassert = false) {
-    if (disposed) return;
+    if (!ensureRuntimeActive()) return;
     if (force) {
       pendingForcedLoad = true;
       pendingForcedStorageRead = pendingForcedStorageRead || forceStorageRead;
@@ -1870,6 +1896,7 @@
 
     pendingScheduleTimer = setTimeout(() => {
       pendingScheduleTimer = null;
+      if (!ensureRuntimeActive()) return;
 
       const shouldForceLoad = pendingForcedLoad;
       const shouldForceStorageRead = pendingForcedStorageRead;
@@ -1924,6 +1951,7 @@
   }
 
   function handleVisibilityChange() {
+    if (!ensureRuntimeActive()) return;
     if (document.visibilityState !== 'visible') return;
     repairConstructedSheetContents(true);
     ensureConstructedSheetInScope(document);
@@ -1938,7 +1966,7 @@
   }
 
   function handleShadowAttached(event) {
-    if (disposed || !shadowState.active) return;
+    if (!ensureRuntimeActive() || !shadowState.active) return;
     if (!event || !isElementNode(event.target)) return;
     const target = event.target;
     if (!getOpenOrClosedShadowRoot(target)) return;
@@ -1979,6 +2007,7 @@
     }
 
     legacyStyleSuppressionObserver = new MutationObserver((mutations) => {
+      if (!ensureRuntimeActive()) return;
       const candidates = new Set();
       for (const mutation of mutations) {
         if (isElementNode(mutation.target) && mutation.target.matches?.(STYLE_SELECTOR)) {
@@ -2099,7 +2128,7 @@
   }
 
   function ensureDomEventListeners(force = false) {
-    if (disposed) return;
+    if (!ensureRuntimeActive()) return;
     const currentDocumentElement = document.documentElement;
     if (!force && boundDocumentElement === currentDocumentElement) return;
 
@@ -2161,7 +2190,7 @@
   }
 
   async function handleStorageChanges(changes, namespace) {
-    if (disposed) return;
+    if (!ensureRuntimeActive()) return;
     if (namespace !== 'local') return;
     if (!isStorageChangeRelevant(changes)) return;
 
@@ -2179,7 +2208,7 @@
   }
 
   function handleStorageChangedEvent(changes, namespace) {
-    if (disposed) return;
+    if (!ensureRuntimeActive()) return;
     handleStorageChanges(changes, namespace).catch((error) => {
       console.error('[CSS Injector] Failed to handle storage changes:', error);
     });
@@ -2198,7 +2227,7 @@
   const VALID_MESSAGE_TYPES = new Set(['css:apply', 'css:clear', 'context:getHost']);
 
   async function handleRuntimeMessage(msg, sender) {
-    if (disposed) return { ok: false, error: 'Runtime disposed' };
+    if (!ensureRuntimeActive()) return { ok: false, error: 'Runtime disposed' };
     if (!msg || typeof msg.type !== 'string') {
       return { ok: false, error: 'Invalid message' };
     }
@@ -2251,7 +2280,7 @@
     storageCache.invalidate();
 
     const hostname = await resolveManagedHostname(true);
-    if (disposed || messageRequestId !== latestLoadRequestId) {
+    if (!ensureRuntimeActive() || messageRequestId !== latestLoadRequestId) {
       return { ok: false, error: 'Superseded' };
     }
     if (!hostname) {
@@ -2301,7 +2330,7 @@
   }
 
   function handleRuntimeMessageEvent(msg, sender, sendResponse) {
-    if (disposed) return false;
+    if (!ensureRuntimeActive()) return false;
     Promise.resolve()
       .then(() => handleRuntimeMessage(msg, sender))
       .then((response) => {

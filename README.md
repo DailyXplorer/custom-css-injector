@@ -2,7 +2,7 @@
 
 Chrome extension (Manifest V3) to inject custom CSS per domain — including iframes and Shadow DOM where supported.
 
-**Version:** 2.2.0
+**Version:** 2.2.1
 
 ## Compatibility
 
@@ -29,6 +29,8 @@ Chrome extension (Manifest V3) to inject custom CSS per domain — including ifr
 - Open, closed, imperative, declarative, and nested author Shadow DOM support
 - One shared, self-repairing stylesheet per frame instead of one DOM node per component
 - Local-only configuration storage with no account or remote service
+
+When updating from 2.2.0 or an earlier version, reload previously opened pages to activate the new extension there. The popup shows a reminder and continues to save edits. Compatible later updates reconnect existing tabs automatically.
 
 ## Styling deeply nested components
 

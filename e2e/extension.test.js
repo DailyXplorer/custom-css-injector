@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const { chromium } = require('playwright');
 
 const EXTENSION_PATH = path.resolve(__dirname, '..');
@@ -15,7 +16,7 @@ const MIGRATION_FLAG = '__cssInjectorMigratedSyncToLocal';
 
 let browserContext;
 let extensionWorker;
-let profileDirectory;
+let extensionSession;
 
 function getFixtureHtml(requestUrl) {
   const pathname = new URL(requestUrl, `http://${MANAGED_HOST}`).pathname;
@@ -371,8 +372,8 @@ async function fulfillFixtureRoute(route) {
   });
 }
 
-async function setStoredCss(css, extraItems = {}) {
-  await extensionWorker.evaluate(async ({ cssText, host, marker, items }) => {
+async function setStoredCss(css, extraItems = {}, worker = extensionWorker) {
+  await worker.evaluate(async ({ cssText, host, marker, items }) => {
     await chrome.storage.local.clear();
     await chrome.storage.local.set(Object.assign({
       [host]: cssText,
@@ -393,8 +394,8 @@ async function updateStoredItems(items) {
   }, items);
 }
 
-async function openFixture(pathname) {
-  const page = await browserContext.newPage();
+async function openFixture(pathname, context = browserContext) {
+  const page = await context.newPage();
   await page.goto(`http://${MANAGED_HOST}:${fixturePort}${pathname}`, {
     waitUntil: 'domcontentloaded'
   });
@@ -405,6 +406,18 @@ async function closePage(page) {
   if (page && !page.isClosed()) {
     await page.close();
   }
+}
+
+async function openPopupForPage(page, worker = extensionWorker) {
+  await page.bringToFront();
+  const popupOpened = page.context().waitForEvent('page');
+  await worker.evaluate(async () => {
+    await chrome.tabs.create({ url: chrome.runtime.getURL('popup.html'), active: false });
+  });
+  const popup = await popupOpened;
+  await popup.waitForLoadState('domcontentloaded');
+  await popup.waitForFunction(() => !document.querySelector('#css-editor').readOnly);
+  return popup;
 }
 
 async function waitForNamedFrame(page, name, timeoutMs = 5000) {
@@ -418,7 +431,7 @@ async function waitForNamedFrame(page, name, timeoutMs = 5000) {
 }
 
 async function reinjectTopFrameContentScript(page, options = {}) {
-  const cdpSession = await browserContext.newCDPSession(page);
+  const cdpSession = await page.context().newCDPSession(page);
   const executionContexts = [];
   cdpSession.on('Runtime.executionContextCreated', ({ context }) => {
     executionContexts.push(context);
@@ -462,9 +475,16 @@ async function reinjectTopFrameContentScript(page, options = {}) {
       awaitPromise: true
     });
     assert.equal(disposeResult.exceptionDetails, undefined);
+    if (options.forceNodeFallback === true) {
+      const fallbackResult = await cdpSession.send('Runtime.evaluate', {
+        contextId: contentScriptContextId,
+        expression: 'globalThis.CSSStyleSheet = undefined'
+      });
+      assert.equal(fallbackResult.exceptionDetails, undefined);
+    }
     const injectionResult = await cdpSession.send('Runtime.evaluate', {
       contextId: contentScriptContextId,
-      expression: fs.readFileSync(path.join(EXTENSION_PATH, 'content-script.js'), 'utf8'),
+      expression: fs.readFileSync(path.join(options.extensionPath || EXTENSION_PATH, 'content-script.js'), 'utf8'),
       awaitPromise: true
     });
     assert.equal(injectionResult.exceptionDetails, undefined);
@@ -473,14 +493,14 @@ async function reinjectTopFrameContentScript(page, options = {}) {
   }
 }
 
-before(async () => {
-  profileDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'css-injector-e2e-'));
-  browserContext = await chromium.launchPersistentContext(profileDirectory, {
+async function launchExtension({ extensionPath = EXTENSION_PATH } = {}) {
+  const profileDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'css-injector-e2e-'));
+  const browserContext = await chromium.launchPersistentContext(profileDirectory, {
     channel: 'chromium',
     headless: true,
     args: [
-      `--disable-extensions-except=${EXTENSION_PATH}`,
-      `--load-extension=${EXTENSION_PATH}`
+      `--disable-extensions-except=${extensionPath}`,
+      `--load-extension=${extensionPath}`
     ]
   });
   await browserContext.route(
@@ -489,19 +509,31 @@ before(async () => {
   );
   browserContext.setDefaultTimeout(5000);
 
-  extensionWorker = browserContext.serviceWorkers()[0] || await browserContext.waitForEvent('serviceworker', {
+  const extensionWorker = browserContext.serviceWorkers()[0] || await browserContext.waitForEvent('serviceworker', {
     timeout: 10000
   });
   assert.match(extensionWorker.url(), /^chrome-extension:\/\/.+\/background\.js$/);
+  const extensionsPage = await browserContext.newPage();
+  await extensionsPage.goto('chrome://extensions');
+  await extensionsPage.evaluate(() => chrome.developerPrivate.updateProfileConfiguration({ inDeveloperMode: true }));
+  await extensionsPage.close();
+  return {
+    browserContext,
+    extensionWorker,
+    async close() {
+      await browserContext.close();
+      fs.rmSync(profileDirectory, { recursive: true, force: true });
+    }
+  };
+}
+
+before(async () => {
+  extensionSession = await launchExtension();
+  ({ browserContext, extensionWorker } = extensionSession);
 });
 
 after(async () => {
-  if (browserContext) {
-    await browserContext.close();
-  }
-  if (profileDirectory) {
-    fs.rmSync(profileDirectory, { recursive: true, force: true });
-  }
+  if (extensionSession) await extensionSession.close();
 });
 
 test('injects into light DOM under a strict page CSP', async () => {
@@ -748,6 +780,40 @@ test('reorders a later site-adopted sheet so extension CSS keeps equal-specifici
   }
 });
 
+test('shares the existing sheet with newly discovered components that adopt their own CSS', async () => {
+  await setStoredCss('#adopted-target, #adopted-shadow-target { color: rgb(1, 2, 3); }');
+  const page = await openFixture('/site-adopted.html');
+  try {
+    await page.waitForFunction(() => (
+      getComputedStyle(document.querySelector('#adopted-target')).color === 'rgb(1, 2, 3)'
+    ));
+    await page.evaluate(() => {
+      window.__initialSheet = document.adoptedStyleSheets.at(-1);
+      window.__newRoots = [];
+      for (let index = 0; index < 50; index += 1) {
+        const host = document.createElement('div');
+        document.body.appendChild(host);
+        const root = host.attachShadow({ mode: index % 2 === 0 ? 'closed' : 'open' });
+        root.innerHTML = '<span id="adopted-shadow-target">new component</span>';
+        const siteSheet = new CSSStyleSheet();
+        siteSheet.replaceSync('#adopted-shadow-target { color: rgb(90, 80, 70); }');
+        root.adoptedStyleSheets = [siteSheet];
+        window.__newRoots.push(root);
+      }
+    });
+    await page.waitForFunction(() => window.__newRoots.every((root) => (
+      getComputedStyle(root.querySelector('#adopted-shadow-target')).color === 'rgb(1, 2, 3)'
+    )));
+    assert.deepEqual(await page.evaluate(() => ({
+      documentUnchanged: document.adoptedStyleSheets.at(-1) === window.__initialSheet,
+      oldRootUnchanged: window.__adoptedRoot.adoptedStyleSheets.at(-1) === window.__initialSheet,
+      sharedRoots: window.__newRoots.filter((root) => root.adoptedStyleSheets.at(-1) === window.__initialSheet).length
+    })), { documentUnchanged: true, oldRootUnchanged: true, sharedRoots: 50 });
+  } finally {
+    await closePage(page);
+  }
+});
+
 test('injects into imperative open, closed, and nested shadow roots', async () => {
   await setStoredCss(`
     :host { --css-injector-e2e: applied; }
@@ -915,6 +981,20 @@ test('@import works through light/open/closed carriers and carriers disappear fo
         carrier.hasAttribute('data-css-injector-owner')
       ));
     });
+
+    const runtimeToken = await page.evaluate(() => {
+      const scopes = [document, window.__importOpenRoot, window.__importClosedRoot];
+      const token = document.querySelector('style[data-css-injector]').getAttribute('data-css-injector-runtime');
+      for (const scope of scopes) {
+        scope.querySelector('style[data-css-injector]').setAttribute('data-css-injector-runtime', 'tampered');
+      }
+      return token;
+    });
+    await page.waitForFunction((token) => (
+      [document, window.__importOpenRoot, window.__importClosedRoot].every((scope) => (
+        scope.querySelector('style[data-css-injector]').getAttribute('data-css-injector-runtime') === token
+      ))
+    ), runtimeToken);
 
     const escapedImportCss = '@' + '\\' + `69 mport url("${importUrl}?variant=escaped");`;
     await updateStoredItems({ [MANAGED_HOST]: escapedImportCss });
@@ -1223,6 +1303,62 @@ test('re-resolves relative constructed URLs and @import after base URL changes',
   }
 });
 
+test('keeps URL-independent CSS across SPA navigation and resolves URLs added by a later edit', async () => {
+  await setStoredCss(`
+    /* A URL in a comment is inert: url(comment.svg). */
+    #base-target, #base-shadow-target { color: rgb(1, 2, 3); font-family: "Your Font", sans-serif; }
+    #base-target::before { content: "★ url(plain-text.svg)"; }
+  `);
+  const page = await openFixture('/base.html');
+  try {
+    await page.waitForFunction(() => (
+      getComputedStyle(document.querySelector('#base-target')).color === 'rgb(1, 2, 3)'
+    ));
+    await page.evaluate(() => {
+      window.__initialSheet = document.adoptedStyleSheets.at(-1);
+      history.pushState({}, '', '/spa/next.html');
+      document.body.appendChild(document.createElement('div'));
+    });
+    await page.waitForTimeout(2200);
+    assert.deepEqual(await page.evaluate(() => ({
+      sameSheet: document.adoptedStyleSheets.at(-1) === window.__initialSheet,
+      sharedSheet: window.__baseRoot.adoptedStyleSheets.at(-1) === window.__initialSheet,
+      color: getComputedStyle(document.querySelector('#base-target')).color
+    })), { sameSheet: true, sharedSheet: true, color: 'rgb(1, 2, 3)' });
+
+    await updateStoredItems({
+      [MANAGED_HOST]: '#base-target, #base-shadow-target { background-image: url(relative.svg); }'
+    });
+    await page.waitForFunction(() => (
+      getComputedStyle(document.querySelector('#base-target')).backgroundImage.includes('/spa/relative.svg') &&
+      getComputedStyle(window.__baseRoot.querySelector('#base-shadow-target')).backgroundImage.includes('/spa/relative.svg')
+    ));
+    await page.evaluate(() => history.pushState({}, '', '/second/next.html'));
+    await page.waitForFunction(() => (
+      getComputedStyle(document.querySelector('#base-target')).backgroundImage.includes('/second/relative.svg') &&
+      getComputedStyle(window.__baseRoot.querySelector('#base-shadow-target')).backgroundImage.includes('/second/relative.svg')
+    ));
+    for (const [index, [image, filename]] of [
+      [String.raw`u\72l(escaped.svg)`, 'escaped.svg'],
+      ['image-set("image-set.svg" 1x)', 'image-set.svg']
+    ].entries()) {
+      await updateStoredItems({
+        [MANAGED_HOST]: `#base-target, #base-shadow-target { background-image: ${image}; }`
+      });
+      await page.waitForFunction((filename) => (
+        getComputedStyle(document.querySelector('#base-target')).backgroundImage.includes(filename)
+      ), filename);
+      await page.evaluate((index) => history.pushState({}, '', `/url-format-${index}/next.html`), index);
+      await page.waitForFunction((directory) => (
+        getComputedStyle(document.querySelector('#base-target')).backgroundImage.includes(directory) &&
+        getComputedStyle(window.__baseRoot.querySelector('#base-shadow-target')).backgroundImage.includes(directory)
+      ), `/url-format-${index}/${filename}`);
+    }
+  } finally {
+    await closePage(page);
+  }
+});
+
 test('uses the top hostname in same-origin, cross-origin, srcdoc, and hidden frames', async () => {
   await setStoredCss('.frame-target, .frame-shadow-target { color: rgb(7, 8, 9) !important; }', {
     [FRAME_HOST]: '.frame-target, .frame-shadow-target { color: rgb(90, 80, 70) !important; }',
@@ -1433,5 +1569,351 @@ test('loads the real popup page without script or console errors', async () => {
     assert.deepEqual(errors, []);
   } finally {
     await closePage(page);
+  }
+});
+
+test('the popup edits, persists, toggles, switches hosts, and resets without reviving pending CSS', async () => {
+  await setStoredCss('#light-target { color: rgb(1, 2, 3); }', {
+    [FRAME_HOST]: '#light-target { color: rgb(10, 11, 12); }'
+  });
+  const page = await openFixture('/light.html');
+  let popup;
+  let otherPage;
+  try {
+    popup = await openPopupForPage(page);
+    const editor = popup.getByRole('textbox', { name: 'Custom CSS', exact: true });
+    const editedCss = '#light-target { color: rgb(4, 5, 6); }';
+    await editor.fill(editedCss);
+    await page.waitForFunction(() => (
+      getComputedStyle(document.querySelector('#light-target')).color === 'rgb(4, 5, 6)'
+    ));
+    await popup.waitForFunction(async ({ host, css }) => (
+      (await chrome.storage.local.get(host))[host] === css
+    ), { host: MANAGED_HOST, css: editedCss });
+
+    await popup.locator('.toggle .slider').click();
+    await page.waitForFunction(() => (
+      getComputedStyle(document.querySelector('#light-target')).color === 'rgb(0, 0, 0)'
+    ));
+    assert.equal(await extensionWorker.evaluate(async (host) => (
+      (await chrome.storage.local.get(`${host}_enabled`))[`${host}_enabled`]
+    ), MANAGED_HOST), false);
+    await popup.locator('.toggle .slider').click();
+    await page.waitForFunction(() => (
+      getComputedStyle(document.querySelector('#light-target')).color === 'rgb(4, 5, 6)'
+    ));
+
+    otherPage = await browserContext.newPage();
+    await otherPage.goto(`http://${FRAME_HOST}:${fixturePort}/light.html`);
+    await otherPage.bringToFront();
+    await popup.waitForFunction(() => (
+      document.querySelector('#css-editor').value === '#light-target { color: rgb(10, 11, 12); }'
+    ));
+    await page.bringToFront();
+    await popup.waitForFunction((css) => document.querySelector('#css-editor').value === css, editedCss);
+
+    await editor.fill('#light-target { color: rgb(20, 21, 22); }');
+    await popup.getByRole('button', { name: 'Reset CSS', exact: true }).click();
+    await page.waitForFunction(() => (
+      getComputedStyle(document.querySelector('#light-target')).color === 'rgb(0, 0, 0)'
+    ));
+    await popup.waitForTimeout(700);
+    assert.equal(await editor.inputValue(), '');
+    assert.deepEqual(await extensionWorker.evaluate(async (host) => (
+      chrome.storage.local.get([host, `${host}_enabled`])
+    ), MANAGED_HOST), {});
+    assert.equal(await extensionWorker.evaluate(async (host) => (
+      (await chrome.storage.local.get(host))[host]
+    ), FRAME_HOST), '#light-target { color: rgb(10, 11, 12); }');
+  } finally {
+    await closePage(popup);
+    await closePage(otherPage);
+    await closePage(page);
+  }
+});
+
+test('the popup imports and exports real files and preserves CSS after an invalid import', async () => {
+  await setStoredCss('#light-target { color: rgb(1, 2, 3); }');
+  const page = await openFixture('/light.html');
+  let popup;
+  try {
+    popup = await openPopupForPage(page);
+    const importedCss = '#light-target { color: rgb(4, 5, 6); }';
+    const entries = [{ host: MANAGED_HOST, css: importedCss, enabled: true }];
+    await popup.locator('#import-file').setInputFiles({
+      name: 'valid.json', mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify({ type: 'custom-css-injector-config', schemaVersion: 1, entries }))
+    });
+    await page.waitForFunction(() => (
+      getComputedStyle(document.querySelector('#light-target')).color === 'rgb(4, 5, 6)'
+    ));
+    await popup.waitForFunction(() => document.querySelector('#config-toast').textContent.includes('Import completed'));
+    const downloadReady = popup.waitForEvent('download');
+    await popup.getByRole('button', { name: 'Export config', exact: true }).click();
+    const download = await downloadReady;
+    assert.deepEqual(JSON.parse(fs.readFileSync(await download.path(), 'utf8')).entries, entries);
+
+    await popup.locator('#import-file').setInputFiles({
+      name: 'invalid.json', mimeType: 'application/json', buffer: Buffer.from('{broken')
+    });
+    await popup.waitForFunction(() => document.querySelector('#config-toast').classList.contains('is-error'));
+    assert.equal(await popup.getByRole('textbox', { name: 'Custom CSS', exact: true }).inputValue(), importedCss);
+    assert.equal(await extensionWorker.evaluate(async (host) => (
+      (await chrome.storage.local.get(host))[host]
+    ), MANAGED_HOST), importedCss);
+  } finally {
+    await closePage(popup);
+    await closePage(page);
+  }
+});
+
+test('stops adopted-sheet, import-carrier, and node-fallback runtimes when the extension is disabled', async () => {
+  const session = await launchExtension();
+  const { browserContext, extensionWorker } = session;
+  await setStoredCss('#light-target { color: rgb(1, 2, 3); }', {
+    [FRAME_HOST]: '@import url("/base-assets/relative-import.css"); #light-target { color: rgb(1, 2, 3); }'
+  }, extensionWorker);
+  const page = await openFixture('/light.html', browserContext);
+  const fallbackPage = await openFixture('/light.html', browserContext);
+  const importPage = await browserContext.newPage();
+  const pages = [page, fallbackPage, importPage];
+  try {
+    await importPage.goto(`http://${FRAME_HOST}:${fixturePort}/light.html`);
+    await importPage.evaluate(() => {
+      const host = document.createElement('div');
+      document.body.appendChild(host);
+      window.__reloadRoot = host.attachShadow({ mode: 'closed' });
+      window.__reloadRoot.innerHTML = '<span id="light-target">shadow</span>';
+    });
+    await importPage.waitForFunction(() => (
+      getComputedStyle(window.__reloadRoot.querySelector('#light-target')).color === 'rgb(1, 2, 3)'
+    ));
+    await reinjectTopFrameContentScript(fallbackPage, { forceNodeFallback: true });
+    for (const target of pages) {
+      await target.waitForFunction(() => (
+        getComputedStyle(document.querySelector('#light-target')).color === 'rgb(1, 2, 3)'
+      ));
+    }
+    assert.equal(await fallbackPage.locator('style[data-css-injector]').count(), 1);
+    assert.equal(await importPage.locator('style[data-css-injector]').count(), 1);
+    const extensionsPage = await browserContext.newPage();
+    await extensionsPage.goto('chrome://extensions');
+    await extensionsPage.evaluate((id) => chrome.management.setEnabled(id, false), new URL(extensionWorker.url()).host);
+    await extensionsPage.close();
+    await importPage.evaluate(() => {
+      for (const scope of [document, window.__reloadRoot]) {
+        const parent = scope === document ? document.body : scope;
+        const carrier = scope.querySelector('style[data-css-injector]');
+        parent.appendChild(carrier.cloneNode(true));
+        const replacement = carrier.cloneNode(false);
+        replacement.setAttribute('data-css-injector-runtime', 'replacement-runtime');
+        replacement.textContent = '#replacement-target { color: rgb(4, 5, 6); }';
+        parent.appendChild(replacement);
+        const target = document.createElement('span');
+        target.id = 'replacement-target';
+        parent.appendChild(target);
+      }
+    });
+    for (const target of pages) {
+      await target.waitForFunction((expectedCarriers) => (
+        document.adoptedStyleSheets.length === 0 &&
+        document.querySelectorAll('style[data-css-injector]').length === expectedCarriers &&
+        getComputedStyle(document.querySelector('#light-target')).color === 'rgb(0, 0, 0)'
+      ), target === importPage ? 1 : 0, { timeout: 5000 });
+      await target.evaluate(() => document.body.appendChild(document.createElement('div')));
+    }
+    await page.waitForTimeout(2200);
+    for (const target of pages) {
+      assert.equal(await target.evaluate(() => (
+        getComputedStyle(document.querySelector('#light-target')).color
+      )), 'rgb(0, 0, 0)');
+    }
+    assert.deepEqual(await importPage.evaluate(() => ({
+      documentColor: getComputedStyle(document.querySelector('#replacement-target')).color,
+      shadowColor: getComputedStyle(window.__reloadRoot.querySelector('#replacement-target')).color,
+      oldShadowColor: getComputedStyle(window.__reloadRoot.querySelector('#light-target')).color,
+      shadowCarriers: window.__reloadRoot.querySelectorAll('style[data-css-injector]').length,
+      shadowSheets: window.__reloadRoot.adoptedStyleSheets.length
+    })), {
+      documentColor: 'rgb(4, 5, 6)', shadowColor: 'rgb(4, 5, 6)', oldShadowColor: 'rgb(0, 0, 0)',
+      shadowCarriers: 1, shadowSheets: 0
+    });
+  } finally {
+    await session.close();
+  }
+});
+
+test('restores saved CSS in existing tabs after an extension update and keeps it controllable', async () => {
+  const session = await launchExtension();
+  const { browserContext, extensionWorker } = session;
+  try {
+    await setStoredCss('.frame-target, .frame-shadow-target { color: rgb(7, 8, 9); }', {
+      [FRAME_HOST]: '@import url("/import.css");'
+    }, extensionWorker);
+    const page = await openFixture('/frames.html', browserContext);
+    await page.evaluate(() => {
+      const target = document.createElement('div');
+      target.className = 'frame-target';
+      document.body.appendChild(target);
+      const host = document.createElement('div');
+      document.body.appendChild(host);
+      window.__frameClosedRoot = host.attachShadow({ mode: 'closed' });
+      window.__frameClosedRoot.innerHTML = '<span class="frame-shadow-target">top shadow</span>';
+    });
+    const importPage = await browserContext.newPage();
+    await importPage.goto(`http://${FRAME_HOST}:${fixturePort}/base.html`);
+    await importPage.waitForFunction(() => getComputedStyle(document.querySelector('#base-target')).color === 'rgb(20, 21, 22)');
+    await importPage.evaluate(() => {
+      window.__beforeUpdateCarrier = document.querySelector('style[data-css-injector]');
+    });
+    const frames = [page.mainFrame()];
+    for (const name of ['same', 'cross', 'srcdoc', 'hidden']) {
+      const frame = await waitForNamedFrame(page, name);
+      assert.ok(frame, `missing ${name} frame`);
+      frames.push(frame);
+    }
+    for (const frame of frames) {
+      await frame.waitForFunction(() => getComputedStyle(document.querySelector('.frame-target')).color === 'rgb(7, 8, 9)');
+      await frame.evaluate(() => { window.__beforeUpdateSheet = document.adoptedStyleSheets.at(-1); });
+    }
+    const restarted = browserContext.waitForEvent('serviceworker', {
+      predicate: (worker) => worker !== extensionWorker,
+      timeout: 10000
+    });
+    restarted.catch(() => {});
+    await extensionWorker.evaluate(() => chrome.runtime.reload()).catch(() => {});
+    for (const frame of frames) {
+      await frame.waitForFunction(() => (
+        document.adoptedStyleSheets.at(-1) !== window.__beforeUpdateSheet &&
+        getComputedStyle(document.querySelector('.frame-target')).color === 'rgb(7, 8, 9)' &&
+        getComputedStyle(window.__frameClosedRoot.querySelector('.frame-shadow-target')).color === 'rgb(7, 8, 9)'
+      ), undefined, { timeout: 10000 });
+      await frame.evaluate(() => {
+        const host = document.createElement('div');
+        document.body.appendChild(host);
+        window.__afterUpdateRoot = host.attachShadow({ mode: 'closed' });
+        window.__afterUpdateRoot.innerHTML = '<span class="frame-shadow-target">new shadow</span>';
+      });
+      await frame.waitForFunction(() => (
+        getComputedStyle(window.__afterUpdateRoot.querySelector('.frame-shadow-target')).color === 'rgb(7, 8, 9)'
+      ));
+    }
+    await importPage.waitForFunction(() => (
+      document.querySelector('style[data-css-injector]') !== window.__beforeUpdateCarrier &&
+      !window.__beforeUpdateCarrier.isConnected &&
+      document.querySelectorAll('style[data-css-injector]').length === 1 &&
+      getComputedStyle(document.querySelector('#base-target')).color === 'rgb(20, 21, 22)' &&
+      getComputedStyle(window.__baseRoot.querySelector('#base-shadow-target')).color === 'rgb(20, 21, 22)'
+    ));
+    const worker = await restarted;
+    await worker.evaluate(async (hosts) => chrome.storage.local.set(Object.fromEntries(
+      hosts.map((host) => [`${host}_enabled`, false])
+    )), [MANAGED_HOST, FRAME_HOST]);
+    for (const frame of frames) {
+      await frame.waitForFunction(() => (
+        getComputedStyle(document.querySelector('.frame-target')).color === 'rgb(0, 0, 0)' &&
+        getComputedStyle(window.__afterUpdateRoot.querySelector('.frame-shadow-target')).color === 'rgb(0, 0, 0)'
+      ));
+    }
+    await importPage.waitForFunction(() => (
+      getComputedStyle(document.querySelector('#base-target')).color === 'rgb(0, 0, 0)' &&
+      document.querySelectorAll('style[data-css-injector]').length === 0
+    ));
+    await worker.evaluate(async (host) => chrome.storage.local.set({ [`${host}_enabled`]: true }), MANAGED_HOST);
+    for (const frame of frames) {
+      await frame.waitForFunction(() => getComputedStyle(document.querySelector('.frame-target')).color === 'rgb(7, 8, 9)');
+    }
+  } finally {
+    await session.close();
+  }
+});
+
+test('keeps legacy 2.2.0 tabs stable across two updates and popup edits until the page reloads', async () => {
+  const extensionPath = fs.mkdtempSync(path.join(os.tmpdir(), 'css-injector-legacy-'));
+  execFileSync('unzip', ['-q', path.join(__dirname, 'fixtures/custom-css-injector-2.2.0.zip'), '-d', extensionPath]);
+  const session = await launchExtension({ extensionPath });
+  const context = session.browserContext;
+  let worker = session.extensionWorker;
+  const oldCss = '#base-target, #base-shadow-target { color: rgb(1, 2, 3); }';
+  const nextCss = '#base-target, #base-shadow-target { color: rgb(9, 9, 9); }';
+  const pages = [];
+  const upgrade = async (version) => {
+    for (const entry of fs.readdirSync(extensionPath)) {
+      fs.cpSync(path.join(EXTENSION_PATH, entry), path.join(extensionPath, entry), { recursive: true });
+    }
+    const manifestPath = path.join(extensionPath, 'manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    manifest.version = version;
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+    const restarted = context.waitForEvent('serviceworker', { predicate: (candidate) => candidate !== worker, timeout: 10000 });
+    restarted.catch(() => {});
+    await worker.evaluate(() => chrome.runtime.reload()).catch(() => {});
+    worker = await restarted;
+  };
+  try {
+    await setStoredCss(oldCss, { [FRAME_HOST]: '@import url("/import.css");' }, worker);
+    pages.push(await openFixture('/base.html', context));
+    pages.push(await openFixture('/base.html', context));
+    await reinjectTopFrameContentScript(pages[1], { forceNodeFallback: true, extensionPath });
+    const importPage = await context.newPage();
+    await importPage.goto(`http://${FRAME_HOST}:${fixturePort}/base.html`);
+    pages.push(importPage);
+    for (const [index, page] of pages.entries()) {
+      const color = index === 2 ? 'rgb(20, 21, 22)' : 'rgb(1, 2, 3)';
+      await page.waitForFunction((color) => (
+        getComputedStyle(document.querySelector('#base-target')).color === color &&
+        getComputedStyle(window.__baseRoot.querySelector('#base-shadow-target')).color === color
+      ), color);
+      await page.evaluate((color) => {
+        const sheets = [...document.adoptedStyleSheets];
+        const carriers = [...document.querySelectorAll('style[data-css-injector]')];
+        window.__transitionFailures = [];
+        window.__transitionInterval = setInterval(() => {
+          if (getComputedStyle(document.querySelector('#base-target')).color !== color ||
+              getComputedStyle(window.__baseRoot.querySelector('#base-shadow-target')).color !== color ||
+              document.adoptedStyleSheets.length !== sheets.length ||
+              document.adoptedStyleSheets.some((sheet, i) => sheet !== sheets[i]) ||
+              carriers.some((node) => !node.isConnected)) {
+            window.__transitionFailures.push(performance.now());
+          }
+        }, 50);
+      }, color);
+    }
+    await upgrade('2.2.1');
+    let popup = await openPopupForPage(pages[0], worker);
+    await popup.waitForFunction(() => document.querySelector('#config-toast').textContent.includes('Reload this page'));
+    await popup.getByRole('textbox', { name: 'Custom CSS', exact: true }).fill(nextCss);
+    await popup.waitForFunction(async ({ host, css }) => (await chrome.storage.local.get(host))[host] === css,
+      { host: MANAGED_HOST, css: nextCss });
+    await worker.evaluate(async ({ host, css }) => chrome.storage.local.set({ [host]: css }), { host: FRAME_HOST, css: nextCss });
+    await popup.close();
+    await pages[0].waitForTimeout(4500);
+    for (const page of pages) assert.deepEqual(await page.evaluate(() => window.__transitionFailures), []);
+
+    await upgrade('2.2.2');
+    popup = await openPopupForPage(pages[0], worker);
+    await popup.waitForFunction(() => document.querySelector('#config-toast').textContent.includes('Reload this page'));
+    await popup.getByRole('button', { name: 'Reset CSS', exact: true }).click();
+    await popup.waitForFunction(async (host) => (await chrome.storage.local.get(host))[host] === undefined, MANAGED_HOST);
+    await popup.getByRole('textbox', { name: 'Custom CSS', exact: true }).fill(nextCss);
+    await popup.waitForFunction(async ({ host, css }) => (await chrome.storage.local.get(host))[host] === css,
+      { host: MANAGED_HOST, css: nextCss });
+    await popup.close();
+    await pages[0].waitForTimeout(4500);
+    for (const page of pages) {
+      assert.deepEqual(await page.evaluate(() => window.__transitionFailures), []);
+      await page.reload();
+      await page.waitForFunction(() => (
+        getComputedStyle(document.querySelector('#base-target')).color === 'rgb(9, 9, 9)' &&
+        getComputedStyle(window.__baseRoot.querySelector('#base-shadow-target')).color === 'rgb(9, 9, 9)'
+      ));
+    }
+    popup = await openPopupForPage(pages[0], worker);
+    assert.equal(await popup.locator('#config-toast').textContent(), '');
+    await popup.getByRole('textbox', { name: 'Custom CSS', exact: true }).fill(oldCss);
+    await pages[0].waitForFunction(() => getComputedStyle(document.querySelector('#base-target')).color === 'rgb(1, 2, 3)');
+  } finally {
+    await session.close();
+    fs.rmSync(extensionPath, { recursive: true, force: true });
   }
 });

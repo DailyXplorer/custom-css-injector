@@ -129,12 +129,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   let configToastTimer = null;
   let configTransferInProgress = false;
-  const SHADOW_BRIDGE_SCRIPT_FILES = ['shadow-dom-bridge.js'];
-  const CONTENT_SCRIPT_FILES = ['utils.js', 'constants.js', 'content-script.js'];
   const CONTENT_SCRIPT_RUNTIME_KEY = '__CSSInjectorContentScriptRuntime';
-  const CONTENT_SCRIPT_RUNTIME_VERSION = 2;
+  const CONTENT_SCRIPT_RUNTIME_VERSION = 3;
   const SHADOW_BRIDGE_RUNTIME_KEY = '__CSSInjectorShadowBridgeRuntime';
-  const SHADOW_BRIDGE_RUNTIME_VERSION = 2;
+  const SHADOW_BRIDGE_RUNTIME_VERSION = 3;
   const contentScriptInjectionTasks = new Map();
 
   const lastPersistedByHost = Object.create(null);
@@ -482,12 +480,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     try {
-      const probeRuntime = (runtimeKey, runtimeVersion, requireBridgeWrapper) => {
+      const probeRuntime = (runtimeKey, runtimeVersion, requireBridgeWrapper, minimumBridgeVersion) => {
         const runtime = globalThis[runtimeKey];
         const attachShadow = globalThis.Element && globalThis.Element.prototype
           ? globalThis.Element.prototype.attachShadow
           : null;
         return {
+          requiresReload: requireBridgeWrapper && !!(
+            (runtime && !(Number.isInteger(runtime.version) && runtime.version >= minimumBridgeVersion)) ||
+            (attachShadow?.__cssInjectorShadowBridgeWrapped && !(
+              Number.isInteger(attachShadow.__cssInjectorShadowBridgeVersion) &&
+              attachShadow.__cssInjectorShadowBridgeVersion >= minimumBridgeVersion
+            ))
+          ),
           ready: !!runtime &&
             runtime.initialized === true &&
             runtime.version === runtimeVersion &&
@@ -512,7 +517,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           target: probeTarget,
           world: 'MAIN',
           func: probeRuntime,
-          args: [SHADOW_BRIDGE_RUNTIME_KEY, SHADOW_BRIDGE_RUNTIME_VERSION, true]
+          args: [SHADOW_BRIDGE_RUNTIME_KEY, SHADOW_BRIDGE_RUNTIME_VERSION, true, cssInjectorUtils.MIN_SAFE_BRIDGE_VERSION]
         })
       ]);
 
@@ -528,6 +533,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       ));
 
       return {
+        requiresReload: bridgeResults.some((result) => result.result?.requiresReload),
         ready: !!(
           topContentResult && topContentResult.result && topContentResult.result.ready === true &&
           topBridgeResult && topBridgeResult.result && topBridgeResult.result.ready === true
@@ -549,11 +555,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function ensureActiveTabContentScript(tabContext) {
     const targetContext = tabContext || getCurrentTabContext();
     if (!targetContext || typeof targetContext.id !== 'number' || !targetContext.scriptable) {
-      return false;
+      return { ok: false };
     }
 
     if (!chrome.scripting || typeof chrome.scripting.executeScript !== 'function') {
-      return false;
+      return { ok: false };
     }
 
     const injectionTaskKey = getContentScriptInjectionTaskKey(targetContext);
@@ -568,54 +574,24 @@ document.addEventListener('DOMContentLoaded', async () => {
         const activeTabId = activeTab && typeof activeTab.id === 'number' ? activeTab.id : null;
         const activeTabUrl = activeTab && typeof activeTab.url === 'string' ? activeTab.url : null;
         if (activeTabId !== targetContext.id || activeTabUrl !== targetContext.url) {
-          return false;
+          return { ok: false };
         }
 
         const runtimeProbe = await probeContentScriptRuntime(targetContext);
         if (runtimeProbe.ready === true && runtimeProbe.allFramesReady === true && runtimeProbe.url === targetContext.url) {
-          return true;
+          return { ok: true };
         }
 
-        try {
-          await chrome.scripting.executeScript({
-            target: { tabId: targetContext.id, allFrames: true },
-            injectImmediately: true,
-            world: 'MAIN',
-            files: SHADOW_BRIDGE_SCRIPT_FILES
-          });
-        } catch (error) {
-          errorHandler.logError('ensureActiveTabShadowBridgeAllFrames', error);
-          try {
-            await chrome.scripting.executeScript({
-              target: { tabId: targetContext.id },
-              injectImmediately: true,
-              world: 'MAIN',
-              files: SHADOW_BRIDGE_SCRIPT_FILES
-            });
-          } catch (fallbackError) {
-            errorHandler.logError('ensureActiveTabShadowBridge', fallbackError);
-          }
-        }
-
-        try {
-          await chrome.scripting.executeScript({
-            target: { tabId: targetContext.id, allFrames: true },
-            injectImmediately: true,
-            files: CONTENT_SCRIPT_FILES
-          });
-        } catch (error) {
-          errorHandler.logError('ensureActiveTabContentScriptAllFrames', error);
-          await chrome.scripting.executeScript({
-            target: { tabId: targetContext.id },
-            injectImmediately: true,
-            files: CONTENT_SCRIPT_FILES
-          });
+        const restored = await cssInjectorUtils.reinjectContentScripts(targetContext.id);
+        if (restored.requiresReload) {
+          if (currentTabId === targetContext.id && currentTabUrl === targetContext.url) showReloadRequiredNotice();
+          return { ok: false, requiresReload: true };
         }
         const postInjectionProbe = await probeContentScriptRuntime(targetContext, { allFrames: false });
-        return postInjectionProbe.ready === true && postInjectionProbe.url === targetContext.url;
+        return { ok: postInjectionProbe.ready === true && postInjectionProbe.url === targetContext.url };
       } catch (error) {
         errorHandler.logError('ensureActiveTabContentScript', error);
-        return false;
+        return { ok: false };
       } finally {
         contentScriptInjectionTasks.delete(injectionTaskKey);
       }
@@ -627,6 +603,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function getEditablePlaceholder() {
     return 'Enter your CSS here…';
+  }
+
+  function showReloadRequiredNotice() {
+    showConfigToast('Reload this page to finish updating the extension.', 'warning', { persistent: true });
   }
 
   function getBlockedUrlPlaceholder(url) {
@@ -967,6 +947,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         placeholder: getEditablePlaceholder(),
         allowDuringUiMutation
       });
+      const runtimeProbe = await probeContentScriptRuntime(resolvedTabContext);
+      if (!loadIsStale()) {
+        if (runtimeProbe.requiresReload) showReloadRequiredNotice();
+        else if (configToast?.textContent === 'Reload this page to finish updating the extension.') clearConfigToast();
+      }
     } catch (error) {
       if (requestId !== loadRequestId ||
           (!allowDuringUiMutation && mutationEpochAtStart !== uiMutationEpoch)) {
@@ -1053,7 +1038,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             host: tabContext && typeof tabContext.host === 'string' ? tabContext.host : getHostname(targetTabUrl),
             scriptable: true
           });
-          if (reinjected) {
+          if (reinjected.requiresReload) return { ok: false, reason: 'reload-required' };
+          if (reinjected.ok) {
             return notifyActiveTab(message, Object.assign({}, options, { allowReinject: false }));
           }
         }

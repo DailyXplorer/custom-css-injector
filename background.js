@@ -1,3 +1,5 @@
+importScripts('utils.js');
+
 const MIGRATION_FLAG = '__cssInjectorMigratedSyncToLocal';
 
 let migrationChain = Promise.resolve();
@@ -183,13 +185,39 @@ function migrateLegacyStorage() {
   return migrationChain;
 }
 
-chrome.runtime.onInstalled.addListener(() => {
+async function restoreStylesAfterUpdate() {
+  const [items, tabs] = await Promise.all([
+    chrome.storage.local.get(null),
+    chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] })
+  ]);
+  const targets = tabs.filter((tab) => (
+    typeof tab.id === 'number' && !tab.discarded &&
+    CSSInjectorUtils.isScriptableUrl(tab.url) &&
+    typeof items[CSSInjectorUtils.getHostname(tab.url)] === 'string'
+  ));
+
+  await Promise.all(targets.map(async (tab) => {
+    try {
+      await CSSInjectorUtils.reinjectContentScripts(tab.id);
+    } catch (error) {
+      console.warn('[CSS Injector] Could not restore an open tab after update:', getErrorMessage(error));
+    }
+  }));
+}
+
+chrome.runtime.onInstalled.addListener((details) => {
   try {
     console.log('CSS Injector extension installed');
   } catch (error) {
     console.error('Failed to handle extension installation:', error);
   }
-  migrateLegacyStorage();
+  migrateLegacyStorage()
+    .then(() => {
+      if (details.reason === 'update') return restoreStylesAfterUpdate();
+    })
+    .catch((error) => {
+      console.warn('[CSS Injector] Could not restore styles after update:', getErrorMessage(error));
+    });
 });
 
 if (chrome.runtime.onStartup) {

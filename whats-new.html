@@ -14,7 +14,34 @@
       <h1>Release notes</h1>
     </header>
 
-    <article class="release-version" id="v2-2-0">
+    <article class="release-version" id="v2-2-1">
+      <header class="release-version-header">
+        <h2 class="release-version-title">2.2.1 update</h2>
+        <p class="release-date"><time datetime="2026-09-20">20 September 2026</time></p>
+      </header>
+
+      <section class="release-section">
+        <h3>Safer updates</h3>
+        <ul>
+          <li>The styling engine now stops when its extension context is disabled or replaced. Compatible updates restore saved styles in existing tabs.</li>
+          <li>Pages opened with 2.2.0 or an earlier version keep their existing styles until you reload them. The popup explains when a reload is needed and continues to save edits.</li>
+          <li>Update recovery uses explicit HTTP and HTTPS host permissions for the same websites already covered by the extension.</li>
+        </ul>
+      </section>
+
+      <section class="release-section">
+        <h3>Fewer unnecessary stylesheet rebuilds</h3>
+        <ul>
+          <li>New Shadow DOM components reuse the shared stylesheet.</li>
+          <li>Page navigation preserves stylesheets whose CSS does not depend on relative URLs, including quoted font names and text.</li>
+          <li>The CSS editor now has an explicit accessible name.</li>
+        </ul>
+      </section>
+    </article>
+
+    <div class="release-divider" role="presentation"></div>
+
+    <article class="release-version release-version--past" id="v2-2-0">
       <header class="release-version-header">
         <h2 class="release-version-title">2.2.0 update</h2>
         <p class="release-date"><time datetime="2026-07-09">9 July 2026</time></p>

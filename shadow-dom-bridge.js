@@ -5,7 +5,7 @@
     ? globalThis
     : (typeof window !== 'undefined' ? window : this);
   const runtimeKey = '__CSSInjectorShadowBridgeRuntime';
-  const runtimeVersion = 2;
+  const runtimeVersion = 3;
   const existingRuntime = root[runtimeKey];
   const installedAttachShadow = root.Element && root.Element.prototype
     ? root.Element.prototype.attachShadow

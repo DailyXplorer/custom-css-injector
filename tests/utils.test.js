@@ -77,6 +77,33 @@ test('hasTopLevelCssImport ignores nested import-like tokens', () => {
   assert.equal(utils.hasTopLevelCssImport(null), false);
 });
 
+test('CSS URL detection distinguishes ordinary strings and comments from URL-bearing syntax', () => {
+  for (const css of [
+    'body { font-family: "Your Font", sans-serif; }',
+    'p::before { content: "★ url(fake.svg) @import"; }',
+    String.raw`p::before { content: 'It\'s a \\ font'; }`,
+    '/* @import "unused.css"; url(unused.svg) */ body { color: red; }',
+    String.raw`.escaped\:name { color: red; }`
+  ]) {
+    assert.equal(utils.cssMayDependOnBaseUrl(css), false, css);
+  }
+  for (const css of [
+    'body { background: url(relative.svg); }',
+    'body { background: URL("relative.svg"); }',
+    'body { background: image-set("relative.svg" 1x); }',
+    'body { background: -webkit-image-set("relative.svg" 1x); }',
+    'body { background: image("relative.svg", red); }',
+    'body { background: src("relative.svg"); }',
+    '@import "relative.css";',
+    String.raw`@\69mport 'relative.css';`,
+    String.raw`body { background: u\72l(relative.svg); }`,
+    String.raw`body { background: image\2d set("relative.svg" 1x); }`,
+    'p { font-family: "bad string\n; background: url(relative.svg); }'
+  ]) {
+    assert.equal(utils.cssMayDependOnBaseUrl(css), true, css);
+  }
+});
+
 test('createHostState preserves string CSS and enabled true', () => {
   assert.deepEqual(utils.createHostState('example.com', 'body{}', true), {
     host: 'example.com',
@@ -219,4 +246,64 @@ test('getErrorMessage returns the fallback for unserializable input', () => {
   const circular = {};
   circular.self = circular;
   assert.equal(utils.getErrorMessage(circular, 'fallback'), 'fallback');
+});
+
+test('reinjection rejects legacy frames before writing scripts and restores only inspected compatible documents', async (t) => {
+  const vm = require('node:vm');
+  const injections = [];
+  let bridgeVersion = 2;
+  let wrapperVersion = 2;
+  let bridgePresent = true;
+  const oldChrome = globalThis.chrome;
+  t.after(() => { globalThis.chrome = oldChrome; });
+  globalThis.chrome = { scripting: { async executeScript(injection) {
+    if (injection.func) {
+      const attachShadow = Object.assign(() => {}, {
+        __cssInjectorShadowBridgeWrapped: true,
+        __cssInjectorShadowBridgeVersion: wrapperVersion
+      });
+      const legacyFrame = vm.runInNewContext(`(${injection.func.toString()})(...args)`, {
+        args: injection.args,
+        __CSSInjectorShadowBridgeRuntime: bridgePresent ? { version: bridgeVersion } : undefined,
+        Element: { prototype: { attachShadow } }
+      });
+      return [
+        { frameId: 0, documentId: 'top-at-probe', result: { requiresReload: false } },
+        { frameId: 3, documentId: 'child-at-probe', result: legacyFrame }
+      ];
+    }
+    injections.push(injection);
+    return [];
+  } } };
+  assert.deepEqual(await utils.reinjectContentScripts(7), { ok: false, requiresReload: true });
+  bridgePresent = false;
+  assert.deepEqual(await utils.reinjectContentScripts(7), { ok: false, requiresReload: true });
+  assert.equal(injections.length, 0);
+  bridgePresent = true;
+  bridgeVersion = 3;
+  wrapperVersion = 3;
+  assert.deepEqual(await utils.reinjectContentScripts(7), { ok: true });
+  assert.deepEqual(injections, [
+    { target: { tabId: 7, documentIds: ['top-at-probe', 'child-at-probe'] }, injectImmediately: true,
+      world: 'MAIN', files: ['shadow-dom-bridge.js'] },
+    { target: { tabId: 7, documentIds: ['top-at-probe', 'child-at-probe'] }, injectImmediately: true,
+      world: 'ISOLATED', files: ['utils.js', 'constants.js', 'content-script.js'] }
+  ]);
+});
+
+test('reinjection fails without document identity and never falls back to a new uninspected page', async (t) => {
+  const oldChrome = globalThis.chrome;
+  t.after(() => { globalThis.chrome = oldChrome; });
+  const writes = [];
+  let documentId;
+  globalThis.chrome = { scripting: { async executeScript(injection) {
+    if (injection.func) return [{ frameId: 0, documentId, result: { requiresReload: false } }];
+    writes.push(injection.target);
+    throw new Error('The inspected document has navigated away');
+  } } };
+  await assert.rejects(utils.reinjectContentScripts(7), /identify the documents/);
+  assert.deepEqual(writes, []);
+  documentId = 'old-document';
+  await assert.rejects(utils.reinjectContentScripts(7), /navigated away/);
+  assert.deepEqual(writes, [{ tabId: 7, documentIds: ['old-document'] }]);
 });
