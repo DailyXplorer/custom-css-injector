@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-OUT_DIR="${1:-_site}"
+OUT_DIR="${1:-dist/site}"
 
 rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR/fonts"

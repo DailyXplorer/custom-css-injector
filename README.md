@@ -91,7 +91,7 @@ After an uninstall, Chrome opens an anonymous feedback form hosted on GitHub Pag
 Preview it locally:
 
 ```bash
-bash scripts/build-site.sh && python3 -m http.server 8765 --directory _site
+bash scripts/build-site.sh && python3 -m http.server 8765 --directory dist/site
 ```
 
 Then open <http://localhost:8765/uninstall/?lang=fr>. Pushing changes under `site/` to `main` redeploys the page.
