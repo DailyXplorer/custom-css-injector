@@ -1,14 +1,14 @@
-Ajoutez votre propre CSS sur n'importe quel site, domaine par domaine – avec une extension minimaliste et légère qui fonctionne, tout simplement.
+Ajoutez votre propre CSS sur n'importe quel site, domaine par domaine, avec une extension minimaliste et légère qui fonctionne, tout simplement.
 
 Custom CSS Injector est un outil pratique pour les développeurs, les designers et les utilisateurs avancés qui veulent personnaliser n'importe quel site en quelques secondes, sans ouvrir les outils de développement ni installer une extension surchargée.
 
 FONCTIONNALITÉS PRINCIPALES
-- Règles par domaine : écrivez du CSS personnalisé pour chaque domaine, appliqué automatiquement à chaque visite du site.
-- Ultra légère : l'une des plus petites extensions du Store, conçue pour consommer le moins possible de mémoire, de processeur et de batterie.
-- Éditeur épuré : une interface claire et sans distraction, pensée pour les modifications rapides.
-- Application intelligente : vos styles s'appliquent dès le chargement de la page, dans tous les onglets et cadres (iframes), pour un rendu cohérent pendant votre navigation.
-- Activation en un clic : activez ou désactivez instantanément vos styles pour comparer avec le site d'origine.
-- Réinitialisation en un clic : effacez les styles d'un domaine en quelques secondes pour repartir de zéro.
+• Règles par domaine : écrivez du CSS personnalisé pour chaque domaine, appliqué automatiquement à chaque visite du site.
+• Ultra légère : l'une des plus petites extensions du Store, conçue pour consommer le moins possible de mémoire, de processeur et de batterie.
+• Éditeur épuré : une interface claire et sans distraction, pensée pour les modifications rapides.
+• Application intelligente : vos styles s'appliquent dès le chargement de la page, dans tous les onglets et cadres (iframes), pour un rendu cohérent pendant votre navigation.
+• Activation en un clic : activez ou désactivez instantanément vos styles pour comparer avec le site d'origine.
+• Réinitialisation en un clic : effacez les styles d'un domaine en quelques secondes pour repartir de zéro.
 
 MINIMALISTE MAIS PUISSANTE
 Custom CSS Injector est volontairement petite et efficace : aucun traceur, aucune publicité, aucune interface superflue.
@@ -17,14 +17,14 @@ Chaque fonctionnalité sert un seul objectif : vous offrir des surcharges CSS fi
 Au lieu d'une interface encombrée de dizaines de panneaux, vous disposez d'un éditeur simple et rapide qui vous mène directement au CSS et vous montre le résultat sur la page.
 
 IDÉALE POUR
-- Les développeurs qui ajustent une mise en page, testent un correctif CSS ou surchargent des styles en préproduction comme en production.
-- Les designers qui modifient espacements, typographie ou couleurs sur des sites en ligne pour explorer rapidement des idées.
-- Les utilisateurs avancés qui veulent masquer les éléments gênants, assombrir les pages trop claires ou rendre n'importe quel site plus agréable à utiliser.
+• Les développeurs qui ajustent une mise en page, testent un correctif CSS ou surchargent des styles en préproduction comme en production.
+• Les designers qui modifient espacements, typographie ou couleurs sur des sites en ligne pour explorer rapidement des idées.
+• Les utilisateurs avancés qui veulent masquer les éléments gênants, assombrir les pages trop claires ou rendre n'importe quel site plus agréable à utiliser.
 
 POURQUOI CETTE EXTENSION
-- Minimaliste : pas de scripts inutiles en arrière-plan, pas de prise en main compliquée, pas de fonctionnalités en trop.
-- Efficace : conçue pour rester légère, même avec de nombreux domaines configurés.
-- Ciblée : elle fait une seule chose, et très bien – du CSS personnalisé par domaine – au lieu de vouloir tout faire.
+• Minimaliste : pas de scripts inutiles en tâche de fond, pas de prise en main compliquée, pas de fonctionnalités en trop.
+• Efficace : conçue pour rester légère, même avec de nombreux domaines configurés.
+• Ciblée : elle fait une seule chose, et très bien, du CSS personnalisé par domaine, au lieu de vouloir tout faire.
 
 Que vous souhaitiez masquer une simple bannière ou entretenir une longue liste de retouches sur vos sites préférés, Custom CSS Injector vous offre une solution rapide, fiable et sans friction.
 

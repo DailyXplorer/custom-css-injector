@@ -1,14 +1,14 @@
-Adicione seu próprio CSS em qualquer site, domínio por domínio – com uma extensão minimalista e leve que simplesmente funciona.
+Adicione seu próprio CSS em qualquer site, domínio por domínio, com uma extensão minimalista e leve que simplesmente funciona.
 
 O Custom CSS Injector é uma ferramenta prática para desenvolvedores, designers e usuários avançados que querem personalizar qualquer site em segundos, sem abrir as ferramentas de desenvolvedor nem instalar extensões pesadas.
 
 PRINCIPAIS RECURSOS
-- Regras por domínio: escreva CSS personalizado para cada domínio e ele será aplicado automaticamente sempre que você visitar o site.
-- Superleve: uma das menores extensões da loja, criada para usar o mínimo de memória, CPU e bateria.
-- Editor limpo: interface focada e sem distrações, pensada para edições rápidas.
-- Aplicação inteligente: os estilos são aplicados no carregamento da página, em todas as abas e frames (iframes), para que suas alterações fiquem consistentes enquanto você navega.
-- Ativar com um clique: ative ou desative seus estilos na hora para comparar com o site original.
-- Redefinir com um clique: apague os estilos de um domínio em segundos se quiser recomeçar do zero.
+• Regras por domínio: escreva CSS personalizado para cada domínio e ele será aplicado automaticamente sempre que você visitar o site.
+• Superleve: uma das menores extensões da loja, criada para usar o mínimo de memória, CPU e bateria.
+• Editor limpo: interface focada e sem distrações, pensada para edições rápidas.
+• Aplicação inteligente: os estilos são aplicados no carregamento da página, em todas as abas e frames (iframes), para que suas alterações fiquem consistentes enquanto você navega.
+• Ativar com um clique: ative ou desative seus estilos na hora para comparar com o site original.
+• Redefinir com um clique: apague os estilos de um domínio em segundos se quiser recomeçar do zero.
 
 MINIMALISTA, MAS PODEROSA
 O Custom CSS Injector é pequeno e eficiente de propósito: sem rastreadores, sem anúncios e sem interface desnecessária.
@@ -17,14 +17,14 @@ Cada recurso tem um único objetivo: oferecer ajustes de CSS confiáveis, site p
 Em vez de uma interface poluída com dezenas de painéis, você tem um editor rápido e simples que leva direto ao CSS e mostra o resultado na página.
 
 IDEAL PARA
-- Desenvolvedores ajustando layouts, testando correções de CSS ou sobrescrevendo estilos em homologação e produção.
-- Designers ajustando espaçamentos, tipografia ou cores em sites reais para explorar ideias rapidamente.
-- Usuários avançados que querem esconder elementos que distraem, escurecer páginas claras demais ou deixar qualquer site mais confortável de usar.
+• Desenvolvedores ajustando layouts, testando correções de CSS ou sobrescrevendo estilos em homologação e produção.
+• Designers ajustando espaçamentos, tipografia ou cores em sites reais para explorar ideias rapidamente.
+• Usuários avançados que querem esconder elementos que distraem, escurecer páginas claras demais ou deixar qualquer site mais confortável de usar.
 
 POR QUE ESTA EXTENSÃO
-- Minimalista: sem scripts desnecessários em segundo plano, sem configuração complicada e sem excesso de recursos.
-- Eficiente: feita para consumir poucos recursos, mesmo com muitos domínios configurados.
-- Focada: faz uma única coisa muito bem – CSS personalizado por domínio – em vez de tentar ser uma caixa de ferramentas completa.
+• Minimalista: sem scripts desnecessários em segundo plano, sem configuração complicada e sem excesso de recursos.
+• Eficiente: feita para consumir poucos recursos, mesmo com muitos domínios configurados.
+• Focada: faz uma única coisa muito bem, CSS personalizado por domínio, em vez de tentar ser uma caixa de ferramentas completa.
 
 Seja para esconder um único banner ou manter uma longa lista de ajustes nos seus sites favoritos, o Custom CSS Injector oferece um jeito rápido, confiável e sem complicação de fazer isso.
 
