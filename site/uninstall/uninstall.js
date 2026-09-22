@@ -132,7 +132,7 @@ const messages = MESSAGES[language];
 
 function applyTranslations() {
   document.documentElement.lang = language;
-  document.title = `Custom CSS Injector — ${messages.title}`;
+  document.title = `${messages.title} | Custom CSS Injector`;
   for (const element of document.querySelectorAll('[data-i18n]')) {
     element.textContent = messages[element.dataset.i18n];
   }
