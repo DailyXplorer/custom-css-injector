@@ -1,0 +1,216 @@
+:root {
+  --page-bg: #ffffff;
+  --text-main: #1f2937;
+  --text-body: #374151;
+  --text-muted: #667085;
+  --line: #e5e7eb;
+  --primary-color: #5383ec;
+  --primary-hover: #4a72d3;
+  --success-color: #27ae60;
+  --error-color: #e74c3c;
+}
+
+@font-face {
+  font-family: 'Telegraf';
+  src: url('../fonts/telegraf/telegraf-400.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Telegraf';
+  src: url('../fonts/telegraf/telegraf-800.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'Telegraf', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-weight: 400;
+  background: var(--page-bg);
+  color: var(--text-main);
+  line-height: 1.5;
+}
+
+.feedback-page {
+  width: min(760px, 100%);
+  margin: 0 auto;
+  padding: 36px 22px 48px;
+}
+
+.feedback-header {
+  margin-bottom: 8px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.feedback-header h1 {
+  margin: 0 0 6px;
+  font-size: 28px;
+  line-height: 1.2;
+  font-weight: 600;
+}
+
+.feedback-lead {
+  margin: 0;
+  font-size: 15px;
+  color: var(--text-muted);
+}
+
+.feedback-section {
+  margin: 0;
+  padding: 20px 0 16px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.feedback-section legend,
+.feedback-label {
+  display: block;
+  margin: 0 0 10px;
+  padding: 0;
+  font-size: 17px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.feedback-section legend {
+  float: left;
+  width: 100%;
+}
+
+.feedback-options {
+  clear: both;
+  display: grid;
+  gap: 8px;
+}
+
+.feedback-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 15px;
+  color: var(--text-body);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.feedback-option:hover {
+  border-color: #cbd5e1;
+}
+
+.feedback-option:has(input:checked) {
+  border-color: var(--primary-color);
+  background: #f3f6fe;
+}
+
+.feedback-option input {
+  margin: 0;
+  accent-color: var(--primary-color);
+}
+
+textarea {
+  width: 100%;
+  min-height: 96px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 15px;
+  color: var(--text-main);
+  resize: vertical;
+}
+
+textarea:focus,
+.feedback-option:focus-within {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 1px;
+}
+
+.feedback-honeypot {
+  position: absolute;
+  left: -9999px;
+}
+
+.feedback-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 0 8px;
+}
+
+.feedback-submit {
+  padding: 10px 20px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--primary-color);
+  color: #ffffff;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.feedback-submit:hover {
+  background: var(--primary-hover);
+}
+
+.feedback-submit:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.feedback-status {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.feedback-status[data-state="error"] {
+  color: var(--error-color);
+}
+
+.feedback-note {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.feedback-thanks {
+  padding: 24px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.feedback-thanks h2 {
+  margin: 0 0 8px;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--success-color);
+}
+
+.feedback-thanks p {
+  margin: 0;
+  font-size: 15px;
+  color: var(--text-body);
+}
+
+.feedback-footer {
+  padding-top: 24px;
+  font-size: 14px;
+}
+
+.feedback-footer a {
+  color: var(--primary-color);
+}

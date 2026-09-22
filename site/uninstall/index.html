@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex">
+  <title>Custom CSS Injector — Uninstall feedback</title>
+  <link rel="icon" href="../icon48.png">
+  <link rel="stylesheet" href="uninstall.css">
+  <script src="uninstall.js" defer></script>
+</head>
+
+<body>
+  <main class="feedback-page">
+    <header class="feedback-header">
+      <h1 data-i18n="title">Sorry to see you go</h1>
+      <p class="feedback-lead" data-i18n="lead">Custom CSS Injector has been removed. Tell us why in ten seconds and help make it better for everyone.</p>
+    </header>
+
+    <form class="feedback-form" id="feedback-form" novalidate>
+      <fieldset class="feedback-section">
+        <legend data-i18n="reasonLegend">Why did you uninstall it?</legend>
+        <div class="feedback-options">
+          <label class="feedback-option"><input type="radio" name="reason" value="didnt_work" required> <span data-i18n="reasonDidntWork">It didn't work on a site I use</span></label>
+          <label class="feedback-option"><input type="radio" name="reason" value="hard_to_use"> <span data-i18n="reasonHardToUse">It was hard to use</span></label>
+          <label class="feedback-option"><input type="radio" name="reason" value="missing_feature"> <span data-i18n="reasonMissingFeature">A feature I need is missing</span></label>
+          <label class="feedback-option"><input type="radio" name="reason" value="slow"> <span data-i18n="reasonSlow">It slowed down my browser</span></label>
+          <label class="feedback-option"><input type="radio" name="reason" value="switched"> <span data-i18n="reasonSwitched">I switched to another extension</span></label>
+          <label class="feedback-option"><input type="radio" name="reason" value="temporary"> <span data-i18n="reasonTemporary">I only needed it for a short time</span></label>
+          <label class="feedback-option"><input type="radio" name="reason" value="other"> <span data-i18n="reasonOther">Another reason</span></label>
+        </div>
+      </fieldset>
+
+      <section class="feedback-section">
+        <label class="feedback-label" for="feedback-comment" data-i18n="commentLabel">Anything else? (optional)</label>
+        <textarea id="feedback-comment" name="comment" rows="4" maxlength="1000" data-i18n-placeholder="commentPlaceholder" placeholder="Which site, which feature, or which extension replaced it?"></textarea>
+      </section>
+
+      <input class="feedback-honeypot" type="checkbox" name="botcheck" tabindex="-1" autocomplete="off" aria-hidden="true">
+
+      <div class="feedback-actions">
+        <button class="feedback-submit" type="submit" data-i18n="submit">Send feedback</button>
+        <p class="feedback-status" id="feedback-status" role="status" aria-live="polite"></p>
+      </div>
+
+      <p class="feedback-note" data-i18n="privacy">Anonymous: no email, no account, nothing about your browsing. Only your answers and the extension version are sent.</p>
+    </form>
+
+    <section class="feedback-thanks" id="feedback-thanks" hidden>
+      <h2 data-i18n="thanksTitle">Thank you!</h2>
+      <p data-i18n="thanksBody">Your answer has been sent. It goes straight to the developer and helps decide what to fix next.</p>
+    </section>
+
+    <footer class="feedback-footer">
+      <a href="https://chromewebstore.google.com/detail/jafljompklilfgjfcdcmmkgdamolfpbi" data-i18n="reinstall">Changed your mind? Reinstall Custom CSS Injector</a>
+    </footer>
+  </main>
+</body>
+
+</html>

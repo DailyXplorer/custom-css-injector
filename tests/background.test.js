@@ -64,6 +64,15 @@ test('fresh install marks migration complete without adding site data', async (t
   assert.deepEqual(stub.getStorageSnapshot('sync'), {});
 });
 
+test('startup registers the uninstall feedback page with the running version', async (t) => {
+  const stub = setupBackground(t, { version: '2.3.0' });
+  await settle();
+
+  assert.deepEqual(stub.uninstallUrls, [
+    'https://dailyxplorer.github.io/custom-css-injector/uninstall/?v=2.3.0'
+  ]);
+});
+
 test('legacy CSS and its disabled state migrate from sync to local', async (t) => {
   const stub = setupBackground(t, {
     sync: { 'a.com': 'body{}', 'a.com_enabled': false }

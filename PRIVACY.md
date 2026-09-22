@@ -1,8 +1,8 @@
 # Privacy Policy
 
-Last updated: 20 September 2026
+Last updated: 22 September 2026
 
-Custom CSS Injector does not collect, transmit, sell, or share personal data. It has no account system, analytics, advertising, tracking SDK, or remote backend.
+Custom CSS Injector does not collect, transmit, sell, or share personal data. It has no account system, analytics, advertising, tracking SDK, or remote backend. The only network-facing feature is the optional uninstall feedback form described below.
 
 ## Data stored by the extension
 
@@ -32,6 +32,12 @@ The extension intentionally does not request the `tabs` permission.
 ## User-authored remote resources
 
 CSS can contain `url()` or `@import` references to remote fonts, images, or stylesheets. If the user adds such CSS, the styled page may contact those third-party URLs under the page's own browser and security rules. The extension neither adds those references nor controls the third party's privacy practices.
+
+## Uninstall feedback
+
+When the extension is uninstalled, Chrome opens a feedback page hosted on GitHub Pages at `https://dailyxplorer.github.io/custom-css-injector/uninstall/`. The address contains only the extension version. The extension itself sends nothing.
+
+Answering is optional. If you submit the form, your selected reason, your optional comment, the extension version, and the page language are sent through [Web3Forms](https://web3forms.com/privacy) to the developer's inbox. The form does not ask for an email address or any other identifier. Do not include personal information in the comment. As with any website, GitHub and Web3Forms receive your IP address when the page loads or the form is sent.
 
 ## Configuration files
 

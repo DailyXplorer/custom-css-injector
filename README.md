@@ -2,7 +2,7 @@
 
 Chrome extension (Manifest V3) to inject custom CSS per domain — including iframes and Shadow DOM where supported.
 
-**Version:** 2.2.1
+**Version:** 2.3.0
 
 ## Compatibility
 
@@ -29,6 +29,7 @@ Chrome extension (Manifest V3) to inject custom CSS per domain — including ifr
 - Open, closed, imperative, declarative, and nested author Shadow DOM support
 - One shared, self-repairing stylesheet per frame instead of one DOM node per component
 - Local-only configuration storage with no account or remote service
+- Store name and summary in English, French, Spanish, Brazilian Portuguese, and German
 
 When updating from 2.2.0 or an earlier version, reload previously opened pages to activate the new extension there. The popup shows a reminder and continues to save edits. Compatible later updates reconnect existing tabs automatically.
 
@@ -82,3 +83,15 @@ Contact me on X: https://x.com/DailyXplorer
 ## License
 
 [PolyForm Noncommercial License 1.0.0](LICENSE) — you may copy, modify, and redistribute this software for **noncommercial** purposes. **Commercial use is not allowed** (selling the code, paid redistribution, or using it as part of a commercial product or service without permission from the author).
+
+## Uninstall feedback page
+
+After an uninstall, Chrome opens an anonymous feedback form hosted on GitHub Pages at <https://dailyxplorer.github.io/custom-css-injector/uninstall/>. Its source lives in `site/`. Responses are delivered by [Web3Forms](https://web3forms.com).
+
+Preview it locally:
+
+```bash
+bash scripts/build-site.sh && python3 -m http.server 8765 --directory _site
+```
+
+Then open <http://localhost:8765/uninstall/?lang=fr>. Pushing changes under `site/` to `main` redeploys the page.

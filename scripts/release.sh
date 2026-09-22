@@ -17,6 +17,7 @@ RUNTIME_JS_FILES=(
 PACKAGE_PATHS=(
   LICENSE
   manifest.json
+  _locales
   background.js
   content-script.js
   shadow-dom-bridge.js
@@ -145,6 +146,40 @@ with zipfile.ZipFile(zip_path) as archive:
         references.append((source, resolved, allow_glob))
 
     manifest = json.loads(archive.read('manifest.json'))
+
+    locale_limits = {'name': 75, 'short_name': 12, 'description': 132}
+    message_keys = {
+        field: manifest[field][len('__MSG_'):-len('__')]
+        for field in locale_limits
+        if isinstance(manifest.get(field), str)
+        and manifest[field].startswith('__MSG_') and manifest[field].endswith('__')
+    }
+    locale_files = sorted(
+        name for name in file_names
+        if name.startswith('_locales/') and name.endswith('/messages.json')
+    )
+    default_locale = manifest.get('default_locale')
+    if message_keys or locale_files or default_locale:
+        default_file = '_locales/%s/messages.json' % default_locale
+        if default_file not in file_names:
+            print('ERROR: default_locale %r needs %s' % (default_locale, default_file), file=sys.stderr)
+            sys.exit(1)
+        locale_errors = []
+        for locale_file in locale_files:
+            messages = json.loads(archive.read(locale_file).decode('utf-8'))
+            for field, key in message_keys.items():
+                text = (messages.get(key) or {}).get('message')
+                if not isinstance(text, str) or not text.strip():
+                    locale_errors.append('%s is missing message %r for manifest %s' % (locale_file, key, field))
+                elif len(text) > locale_limits[field]:
+                    locale_errors.append('%s message %r is %d characters; Chrome allows %d for %s'
+                                         % (locale_file, key, len(text), locale_limits[field], field))
+        if locale_errors:
+            for error in locale_errors:
+                print('ERROR: ' + error, file=sys.stderr)
+            sys.exit(1)
+        print('OK: verified %d locales for manifest messages %s'
+              % (len(locale_files), ', '.join(sorted(message_keys.values()))))
 
     def add_icon_references(source, value):
         if isinstance(value, str):

@@ -53,6 +53,7 @@ function createChromeStub(initialState = {}) {
   const hangRules = [];
   const storageCalls = [];
   const tabsSendMessageCalls = [];
+  const uninstallUrls = [];
   let tabsResponder = null;
 
   const runtime = {
@@ -60,7 +61,12 @@ function createChromeStub(initialState = {}) {
     lastError: undefined,
     onInstalled: createEvent(listeners.onInstalled),
     onStartup: createEvent(listeners.onStartup),
-    onMessage: createEvent(listeners.onMessage)
+    onMessage: createEvent(listeners.onMessage),
+    getManifest: () => ({ version: initialState.version || '0.0.0-test' }),
+    setUninstallURL(url) {
+      uninstallUrls.push(url);
+      return Promise.resolve();
+    }
   };
 
   function addRule(bucket, area, method, value, options = {}) {
@@ -276,6 +282,7 @@ function createChromeStub(initialState = {}) {
     listeners,
     storageCalls,
     tabsSendMessageCalls,
+    uninstallUrls,
     failNext(area, method, error, options) {
       addRule(failureRules, area, method, error, options);
     },

@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": "Custom CSS Injector – CSS personalizado por site",
+    "description": "Extension name shown in Chrome and as the Chrome Web Store title (75 characters max)."
+  },
+  "extDescription": {
+    "message": "Adicione seu próprio CSS em cada site. Uma extensão minimalista e superleve para personalizar qualquer site sem complicação.",
+    "description": "Extension summary shown in Chrome and on the Chrome Web Store (132 characters max)."
+  }
+}

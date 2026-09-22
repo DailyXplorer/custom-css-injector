@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": "Custom CSS Injector – eigenes CSS für jede Website",
+    "description": "Extension name shown in Chrome and as the Chrome Web Store title (75 characters max)."
+  },
+  "extDescription": {
+    "message": "Eigenes CSS für jede Domain. Eine minimalistische, ressourcenschonende Erweiterung, um jede Website ohne Ballast anzupassen.",
+    "description": "Extension summary shown in Chrome and on the Chrome Web Store (132 characters max)."
+  }
+}

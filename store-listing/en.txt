@@ -1,0 +1,31 @@
+Inject custom CSS on any website, per domain – with a minimalist, low-overhead extension that just works.
+
+Custom CSS Injector is a practical tool for developers, designers, and power users who want to personalize any site in seconds, without heavy devtools or bloated extensions.
+
+KEY FEATURES
+- Per-domain rules: write custom CSS per domain and have it auto-applied every time you visit the site.
+- Ultra lightweight: one of the smallest extensions in the store, carefully built to use minimal memory, CPU and battery.
+- Clean editor: focused, distraction-free UI designed for fast edits and quick tweaks.
+- Smart application: styles are applied on page load and across tabs/frames so your changes stay consistent as you browse.
+- One-click toggle: instantly enable or disable your custom styles when you need to compare with the original site.
+- One-click reset: clear a domain's custom styles in seconds if you want to start fresh.
+
+MINIMALIST BUT POWERFUL
+Custom CSS Injector is intentionally small and efficient, with no trackers, no ads, and no unnecessary UI.
+Every feature is focused on one job: giving you reliable, per-site CSS overrides that feel invisible until you need them.
+
+Instead of a cluttered interface with dozens of panels, you get a fast, simple editor that lets you jump straight to the CSS and see the result on the page.
+
+PERFECT FOR
+- Developers fine-tuning layouts, testing CSS fixes, or overriding styles on staging and production.
+- Designers adjusting spacing, typography or colors on live sites to explore ideas quickly.
+- Power users who want to hide distracting elements, darken bright pages, or make any site feel more comfortable to use.
+
+WHY THIS EXTENSION
+- Minimalist: no unnecessary background scripts, no complex onboarding, no feature overload.
+- Efficient: designed to stay light on resources, even with many domains configured.
+- Focused: does one thing extremely well – custom CSS per domain – instead of trying to be an all-in-one toolbox.
+
+Whether you just want to hide a single banner or maintain a long list of custom tweaks across your favorite sites, Custom CSS Injector gives you a fast, reliable and low-friction way to do it.
+
+Built on Chrome's modern Scripting API for stable, predictable behavior on modern websites.

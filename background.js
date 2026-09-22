@@ -1,6 +1,7 @@
 importScripts('utils.js');
 
 const MIGRATION_FLAG = '__cssInjectorMigratedSyncToLocal';
+const UNINSTALL_FEEDBACK_URL = 'https://dailyxplorer.github.io/custom-css-injector/uninstall/';
 
 let migrationChain = Promise.resolve();
 
@@ -227,6 +228,20 @@ if (chrome.runtime.onStartup) {
 }
 
 migrateLegacyStorage();
+
+function registerUninstallFeedbackUrl() {
+  try {
+    const version = chrome.runtime.getManifest().version;
+    const url = `${UNINSTALL_FEEDBACK_URL}?v=${encodeURIComponent(version)}`;
+    Promise.resolve(chrome.runtime.setUninstallURL(url)).catch((error) => {
+      console.warn('[CSS Injector] Could not register the uninstall feedback page:', getErrorMessage(error));
+    });
+  } catch (error) {
+    console.warn('[CSS Injector] Could not register the uninstall feedback page:', getErrorMessage(error));
+  }
+}
+
+registerUninstallFeedbackUrl();
 
 async function handleRuntimeMessage(message, sender) {
   if (!message || typeof message.type !== 'string') {

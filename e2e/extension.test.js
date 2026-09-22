@@ -1838,7 +1838,7 @@ test('keeps legacy 2.2.0 tabs stable across two updates and popup edits until th
   const nextCss = '#base-target, #base-shadow-target { color: rgb(9, 9, 9); }';
   const pages = [];
   const upgrade = async (version) => {
-    for (const entry of fs.readdirSync(extensionPath)) {
+    for (const entry of new Set([...fs.readdirSync(extensionPath), '_locales'])) {
       fs.cpSync(path.join(EXTENSION_PATH, entry), path.join(extensionPath, entry), { recursive: true });
     }
     const manifestPath = path.join(extensionPath, 'manifest.json');
