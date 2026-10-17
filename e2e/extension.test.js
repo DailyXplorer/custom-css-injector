@@ -1562,6 +1562,11 @@ test('loads the real popup page without script or console errors', async () => {
     });
     if (response) assert.ok(response.ok());
     await page.waitForSelector('#css-editor');
+    assert.equal(
+      await page.locator('.editor-container + .editor-hint').textContent(),
+      'Not applying? Add !important to your rule.'
+    );
+    assert.equal(await page.locator('.editor-hint code').textContent(), '!important');
     await page.waitForFunction(() => (
       document.querySelector('#version-text').textContent.trim().length > 0
     ));

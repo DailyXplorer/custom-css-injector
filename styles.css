@@ -356,6 +356,18 @@ input:checked+.slider:before {
   -webkit-text-fill-color: #9ca3af;
 }
 
+.editor-hint {
+  margin: -2px 0 8px;
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--editor-gutter-fg);
+}
+
+.editor-hint code {
+  font-family: var(--editor-code-font);
+  font-size: 11px;
+}
+
 .buttons-layout {
   display: flex;
   flex-direction: column;
