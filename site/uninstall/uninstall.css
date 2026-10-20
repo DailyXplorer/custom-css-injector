@@ -119,22 +119,50 @@ body {
   accent-color: var(--primary-color);
 }
 
-textarea {
+textarea,
+.feedback-input {
   width: 100%;
-  min-height: 96px;
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
   font: inherit;
   font-size: 15px;
   color: var(--text-main);
+}
+
+textarea {
+  display: block;
+  min-height: 96px;
   resize: vertical;
 }
 
 textarea:focus,
+.feedback-input:focus,
 .feedback-option:focus-within {
   outline: 2px solid var(--primary-color);
   outline-offset: 1px;
+}
+
+textarea[aria-invalid="true"] {
+  border-color: var(--error-color);
+}
+
+.feedback-error {
+  margin: 8px 0 0;
+  font-size: 14px;
+  color: var(--error-color);
+}
+
+.feedback-field {
+  margin-top: 14px;
+}
+
+.feedback-sublabel {
+  display: block;
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-body);
 }
 
 .feedback-honeypot {

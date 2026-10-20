@@ -7,3 +7,4 @@ require('./popup-main.test.js');
 require('./popup-storage-helpers.test.js');
 require('./utils-storage.test.js');
 require('./utils.test.js');
+require('./uninstall-core.test.js');

@@ -37,7 +37,7 @@ CSS can contain `url()` or `@import` references to remote fonts, images, or styl
 
 When the extension is uninstalled, Chrome opens a feedback page hosted on GitHub Pages at `https://dailyxplorer.github.io/custom-css-injector/uninstall/`. The address contains only the extension version. The extension itself sends nothing.
 
-Answering is optional. If you submit the form, your selected reason, your optional comment, the extension version, and the page language are sent through [Web3Forms](https://web3forms.com/privacy) to the developer's inbox. The form does not ask for an email address or any other identifier. Do not include personal information in the comment. As with any website, GitHub and Web3Forms receive your IP address when the page loads or the form is sent.
+Answering is optional. If you submit the form, your answers (the selected reason, your comment, and, if you report a site where the extension did not work, only that site's hostname such as `youtube.com`), the extension version, your browser version, your operating system, and the page language are sent through [Web3Forms](https://web3forms.com/privacy) to the developer's inbox. The browser version is the browser name and major version (for example, `Chrome 131`), and the operating system is only its family (Windows, macOS, Linux, ChromeOS, or other); the full user-agent string is not sent. The form does not ask for an email address or any other identifier. Do not include personal information in the comment. As with any website, GitHub and Web3Forms receive your IP address when the page loads or the form is sent.
 
 ## Configuration files
 

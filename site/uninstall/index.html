@@ -8,6 +8,7 @@
   <title>Uninstall feedback | Custom CSS Injector</title>
   <link rel="icon" href="../icon48.png">
   <link rel="stylesheet" href="uninstall.css">
+  <script src="uninstall-core.js" defer></script>
   <script src="uninstall.js" defer></script>
 </head>
 
@@ -32,9 +33,14 @@
         </div>
       </fieldset>
 
-      <section class="feedback-section">
-        <label class="feedback-label" for="feedback-comment" data-i18n="commentLabel">Anything else? (optional)</label>
-        <textarea id="feedback-comment" name="comment" rows="4" maxlength="1000" data-i18n-placeholder="commentPlaceholder" placeholder="Which site, which feature, or which extension replaced it?"></textarea>
+      <section class="feedback-section" id="feedback-details" hidden>
+        <label class="feedback-label" id="feedback-comment-label" for="feedback-comment">Tell us what happened</label>
+        <textarea id="feedback-comment" name="comment" rows="4" maxlength="1000" aria-describedby="feedback-comment-error" placeholder="A sentence or two is enough"></textarea>
+        <p class="feedback-error" id="feedback-comment-error" hidden></p>
+        <div class="feedback-field" id="feedback-site-field" hidden>
+          <label class="feedback-sublabel" for="feedback-site" data-i18n="siteLabel">Which site? (optional)</label>
+          <input class="feedback-input" type="text" id="feedback-site" name="site" maxlength="300" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" data-i18n-placeholder="sitePlaceholder" placeholder="e.g. youtube.com">
+        </div>
       </section>
 
       <input class="feedback-honeypot" type="checkbox" name="botcheck" tabindex="-1" autocomplete="off" aria-hidden="true">
@@ -44,7 +50,7 @@
         <p class="feedback-status" id="feedback-status" role="status" aria-live="polite"></p>
       </div>
 
-      <p class="feedback-note" data-i18n="privacy">Anonymous: no email, no account, nothing about your browsing. Only your answers and the extension version are sent.</p>
+      <p class="feedback-note" data-i18n="privacy">Anonymous: no email, no account, nothing about your browsing. Only your answers, the extension version, and your browser version and operating system are sent.</p>
     </form>
 
     <section class="feedback-thanks" id="feedback-thanks" hidden>
